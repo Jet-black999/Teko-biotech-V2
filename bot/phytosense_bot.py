@@ -92,7 +92,8 @@ def inline_soil_keyboard():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("🏖️ Solo Arenoso (Praia / Litoral - CC: 10 kPa)", callback_data="set_solo_arenoso"),
-        InlineKeyboardButton("🌾 Solo Franco / Médio (Equilibrado - CC: 22 kPa)", callback_data="set_solo_franco"),
+        InlineKeyboardButton("🌾 Solo Franco-Arenoso (Médio-Leve - CC: 15 kPa)", callback_data="set_solo_franco_arenoso"),
+        InlineKeyboardButton("🌱 Solo Franco / Médio (Equilibrado - CC: 22 kPa)", callback_data="set_solo_franco"),
         InlineKeyboardButton("🧱 Solo Argiloso (Terra Roxa - CC: 33 kPa)", callback_data="set_solo_argiloso")
     )
     return markup
@@ -260,6 +261,7 @@ def callback_solo(call):
 
     nomes = {
         "arenoso": "Solo Arenoso (Leve / Litoral)",
+        "franco_arenoso": "Solo Franco-Arenoso (Médio-Leve)",
         "franco": "Solo Franco / Médio",
         "argiloso": "Solo Argiloso (Terra Roxa / Várzea)"
     }

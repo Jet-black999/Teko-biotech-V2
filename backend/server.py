@@ -23,13 +23,17 @@ try:
         obter_perfil_por_id,
         obter_historico_leituras as obter_historico_sqlite,
         salvar_nova_leitura,
-        registrar_alerta_banco
+        registrar_alerta_banco,
+        obter_solos_van_genuchten,
+        obter_fases_cultura
     )
     from motor_predicao import (
         adc_para_kpa_simulado,
         calcular_taxa_secagem,
         prever_estresse_hidrico,
-        classificar_estado_hidrico_solo
+        classificar_estado_hidrico_solo,
+        calcular_van_genuchten,
+        calcular_lamina_irrigacao
     )
 except ImportError:
     from backend.database import (
@@ -39,13 +43,17 @@ except ImportError:
         obter_perfil_por_id,
         obter_historico_leituras as obter_historico_sqlite,
         salvar_nova_leitura,
-        registrar_alerta_banco
+        registrar_alerta_banco,
+        obter_solos_van_genuchten,
+        obter_fases_cultura
     )
     from backend.motor_predicao import (
         adc_para_kpa_simulado,
         calcular_taxa_secagem,
         prever_estresse_hidrico,
-        classificar_estado_hidrico_solo
+        classificar_estado_hidrico_solo,
+        calcular_van_genuchten,
+        calcular_lamina_irrigacao
     )
 
 # Carrega variáveis de ambiente procurando em múltiplos caminhos do projeto
@@ -911,6 +919,39 @@ def listar_perfis_cultura():
         "total": len(perfis),
         "perfis": perfis
     }
+
+
+@app.get("/api/solos/van-genuchten")
+def listar_solos_van_genuchten():
+    """Retorna os parâmetros de retenção de água segundo Van Genuchten (11 solos)."""
+    solos = obter_solos_van_genuchten()
+    return {
+        "total": len(solos),
+        "solos": solos
+    }
+
+
+@app.get("/api/solos/van-genuchten/calcular")
+def calcular_retencao_solo(h_kpa: float = 25.0, classe: str = "Franco (Loam)"):
+    """Calcula a umidade volumétrica θ(h) para uma tensão e classe textural dada."""
+    return calcular_van_genuchten(h_kpa=h_kpa, classe=classe)
+
+
+@app.get("/api/culturas/fases")
+def listar_fases_cultura(cultura: Optional[str] = None):
+    """Retorna as fases fenológicas, raízes ativas (mm), Kc e limites hídricos diferenciados por solo."""
+    fases = obter_fases_cultura(cultura_id=cultura)
+    return {
+        "total": len(fases),
+        "cultura_filtro": cultura,
+        "fases": fases
+    }
+
+
+@app.get("/api/culturas/fases/calculo-lamina")
+def calcular_lamina_endpoint(et0: float = 4.0, kc: float = 1.0):
+    """Calcula a lâmina de irrigação recomendada ETc = ET0 * Kc em mm/dia e L/m²."""
+    return calcular_lamina_irrigacao(et0=et0, kc=kc)
 
 
 @app.get("/api/historico")

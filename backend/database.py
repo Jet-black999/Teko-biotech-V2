@@ -70,6 +70,37 @@ def inicializar_banco() -> None:
             );
         """)
 
+        # Tabela 4: Parâmetros Hidráulicos de Van Genuchten (11 Solos)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solos_van_genuchten (
+                classe TEXT PRIMARY KEY,
+                theta_r REAL NOT NULL,
+                theta_s REAL NOT NULL,
+                alpha REAL NOT NULL,
+                n REAL NOT NULL,
+                m REAL NOT NULL,
+                cc_kpa REAL NOT NULL,
+                pmp_kpa REAL NOT NULL
+            );
+        """)
+
+        # Tabela 5: Matriz Fenológica das Culturas (Embrapa / FAO-56)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fases_cultura (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cultura_id TEXT NOT NULL,
+                fase TEXT NOT NULL,
+                raiz_mm INTEGER NOT NULL,
+                kc REAL NOT NULL,
+                limiar_arenoso_kpa REAL NOT NULL,
+                limiar_franco_arenoso_kpa REAL NOT NULL,
+                limiar_franco_kpa REAL NOT NULL,
+                limiar_franco_argiloso_kpa REAL NOT NULL,
+                limiar_argiloso_kpa REAL NOT NULL,
+                fonte TEXT NOT NULL
+            );
+        """)
+
         conn.commit()
 
     _banco_inicializado = True
@@ -85,8 +116,47 @@ def obter_conexao() -> sqlite3.Connection:
     return conn
 
 
+DADOS_VAN_GENUCHTEN = [
+    {"classe": "Areia (Sand)", "theta_r": 0.045, "theta_s": 0.430, "alpha": 0.145, "n": 2.68, "m": 0.627, "cc_kpa": 10.0, "pmp_kpa": 1500.0},
+    {"classe": "Areia Franca (Loamy Sand)", "theta_r": 0.057, "theta_s": 0.410, "alpha": 0.124, "n": 2.28, "m": 0.561, "cc_kpa": 15.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco-Arenoso (Sandy Loam)", "theta_r": 0.065, "theta_s": 0.410, "alpha": 0.075, "n": 1.89, "m": 0.471, "cc_kpa": 20.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco (Loam)", "theta_r": 0.078, "theta_s": 0.430, "alpha": 0.036, "n": 1.56, "m": 0.359, "cc_kpa": 25.0, "pmp_kpa": 1500.0},
+    {"classe": "Silte (Silt)", "theta_r": 0.034, "theta_s": 0.460, "alpha": 0.016, "n": 1.37, "m": 0.270, "cc_kpa": 30.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco-Siltoso (Silt Loam)", "theta_r": 0.067, "theta_s": 0.450, "alpha": 0.020, "n": 1.41, "m": 0.291, "cc_kpa": 30.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco-Argilo-Arenoso (Sandy Clay Loam)", "theta_r": 0.100, "theta_s": 0.390, "alpha": 0.059, "n": 1.48, "m": 0.324, "cc_kpa": 28.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco-Argiloso (Clay Loam)", "theta_r": 0.095, "theta_s": 0.410, "alpha": 0.019, "n": 1.31, "m": 0.237, "cc_kpa": 33.0, "pmp_kpa": 1500.0},
+    {"classe": "Franco-Argilo-Siltoso (Silty Clay Loam)", "theta_r": 0.089, "theta_s": 0.430, "alpha": 0.010, "n": 1.23, "m": 0.187, "cc_kpa": 33.0, "pmp_kpa": 1500.0},
+    {"classe": "Argilo-Arenoso (Sandy Clay)", "theta_r": 0.100, "theta_s": 0.380, "alpha": 0.027, "n": 1.23, "m": 0.187, "cc_kpa": 35.0, "pmp_kpa": 1500.0},
+    {"classe": "Argiloso (Clay / Latossolo)", "theta_r": 0.070, "theta_s": 0.380, "alpha": 0.008, "n": 1.09, "m": 0.083, "cc_kpa": 40.0, "pmp_kpa": 1500.0}
+]
+
+DADOS_FASES_CULTURA = [
+    # Milho
+    {"cultura_id": "milho", "fase": "Nascendo / Milho na canela", "raiz_mm": 150, "kc": 0.40, "limiar_arenoso_kpa": 20, "limiar_franco_arenoso_kpa": 25, "limiar_franco_kpa": 25, "limiar_franco_argiloso_kpa": 30, "limiar_argiloso_kpa": 35, "fonte": "Embrapa-RR (1997), Tabela 17"},
+    {"cultura_id": "milho", "fase": "Crescendo / Milho na cintura", "raiz_mm": 350, "kc": 0.83, "limiar_arenoso_kpa": 40, "limiar_franco_arenoso_kpa": 45, "limiar_franco_kpa": 45, "limiar_franco_argiloso_kpa": 55, "limiar_argiloso_kpa": 60, "fonte": "Embrapa-RR (1997), Tabela 17"},
+    {"cultura_id": "milho", "fase": "Soltando pendão e boneca", "raiz_mm": 500, "kc": 1.13, "limiar_arenoso_kpa": 30, "limiar_franco_arenoso_kpa": 35, "limiar_franco_kpa": 35, "limiar_franco_argiloso_kpa": 45, "limiar_argiloso_kpa": 50, "fonte": "Embrapa-RR (1997), Tabela 17"},
+    {"cultura_id": "milho", "fase": "Enchendo grão", "raiz_mm": 500, "kc": 0.88, "limiar_arenoso_kpa": 40, "limiar_franco_arenoso_kpa": 45, "limiar_franco_kpa": 45, "limiar_franco_argiloso_kpa": 55, "limiar_argiloso_kpa": 60, "fonte": "Embrapa-RR (1997), Tabela 17"},
+    {"cultura_id": "milho", "fase": "Grão duro / Secando para colheita", "raiz_mm": 500, "kc": 0.58, "limiar_arenoso_kpa": 65, "limiar_franco_arenoso_kpa": 70, "limiar_franco_kpa": 70, "limiar_franco_argiloso_kpa": 80, "limiar_argiloso_kpa": 85, "fonte": "Embrapa-RR (1997), Tabela 17"},
+    # Tomate
+    {"cultura_id": "tomate", "fase": "Pegamento das mudas", "raiz_mm": 120, "kc": 0.60, "limiar_arenoso_kpa": 12, "limiar_franco_arenoso_kpa": 15, "limiar_franco_kpa": 15, "limiar_franco_argiloso_kpa": 20, "limiar_argiloso_kpa": 25, "fonte": "Embrapa Hortaliças (2008), Tab. 3 e 4"},
+    {"cultura_id": "tomate", "fase": "Crescimento vegetativo", "raiz_mm": 250, "kc": 0.80, "limiar_arenoso_kpa": 25, "limiar_franco_arenoso_kpa": 30, "limiar_franco_kpa": 30, "limiar_franco_argiloso_kpa": 35, "limiar_argiloso_kpa": 40, "fonte": "Embrapa Hortaliças (2008), Tab. 3 e 4"},
+    {"cultura_id": "tomate", "fase": "Floração e frutificação", "raiz_mm": 400, "kc": 1.15, "limiar_arenoso_kpa": 15, "limiar_franco_arenoso_kpa": 20, "limiar_franco_kpa": 20, "limiar_franco_argiloso_kpa": 25, "limiar_argiloso_kpa": 30, "fonte": "Embrapa Hortaliças (2008), Tab. 3 e 4"},
+    {"cultura_id": "tomate", "fase": "Maturação dos frutos", "raiz_mm": 400, "kc": 0.80, "limiar_arenoso_kpa": 30, "limiar_franco_arenoso_kpa": 35, "limiar_franco_kpa": 35, "limiar_franco_argiloso_kpa": 45, "limiar_argiloso_kpa": 50, "fonte": "Embrapa Hortaliças (2008), Tab. 3 e 4"},
+    # Feijão
+    {"cultura_id": "feijao", "fase": "Germinação e emergência (V0-V2)", "raiz_mm": 100, "kc": 0.40, "limiar_arenoso_kpa": 15, "limiar_franco_arenoso_kpa": 20, "limiar_franco_kpa": 20, "limiar_franco_argiloso_kpa": 25, "limiar_argiloso_kpa": 30, "fonte": "Embrapa Arroz e Feijão / FAO-56"},
+    {"cultura_id": "feijao", "fase": "Desenvolvimento vegetativo (V3-V4)", "raiz_mm": 250, "kc": 0.75, "limiar_arenoso_kpa": 30, "limiar_franco_arenoso_kpa": 35, "limiar_franco_kpa": 35, "limiar_franco_argiloso_kpa": 40, "limiar_argiloso_kpa": 45, "fonte": "Embrapa Arroz e Feijão / FAO-56"},
+    {"cultura_id": "feijao", "fase": "Floração e formação de vagens (R5-R7)", "raiz_mm": 350, "kc": 1.10, "limiar_arenoso_kpa": 20, "limiar_franco_arenoso_kpa": 25, "limiar_franco_kpa": 25, "limiar_franco_argiloso_kpa": 30, "limiar_argiloso_kpa": 35, "fonte": "Embrapa Arroz e Feijão / FAO-56"},
+    {"cultura_id": "feijao", "fase": "Enchimento de grãos e maturação (R8-R9)", "raiz_mm": 350, "kc": 0.65, "limiar_arenoso_kpa": 45, "limiar_franco_arenoso_kpa": 50, "limiar_franco_kpa": 50, "limiar_franco_argiloso_kpa": 60, "limiar_argiloso_kpa": 65, "fonte": "Embrapa Arroz e Feijão / FAO-56"},
+    # Alface
+    {"cultura_id": "alface", "fase": "Pegamento de mudas (Transplante)", "raiz_mm": 80, "kc": 0.70, "limiar_arenoso_kpa": 10, "limiar_franco_arenoso_kpa": 12, "limiar_franco_kpa": 12, "limiar_franco_argiloso_kpa": 15, "limiar_argiloso_kpa": 18, "fonte": "Embrapa Hortaliças / FAO-56"},
+    {"cultura_id": "alface", "fase": "Crescimento vegetativo inicial", "raiz_mm": 150, "kc": 0.90, "limiar_arenoso_kpa": 15, "limiar_franco_arenoso_kpa": 18, "limiar_franco_kpa": 18, "limiar_franco_argiloso_kpa": 22, "limiar_argiloso_kpa": 25, "fonte": "Embrapa Hortaliças / FAO-56"},
+    {"cultura_id": "alface", "fase": "Formação de cabeça / Enfolhamento pleno", "raiz_mm": 200, "kc": 1.05, "limiar_arenoso_kpa": 12, "limiar_franco_arenoso_kpa": 15, "limiar_franco_kpa": 15, "limiar_franco_argiloso_kpa": 20, "limiar_argiloso_kpa": 22, "fonte": "Embrapa Hortaliças / FAO-56"},
+    {"cultura_id": "alface", "fase": "Pré-colheita", "raiz_mm": 200, "kc": 0.95, "limiar_arenoso_kpa": 18, "limiar_franco_arenoso_kpa": 22, "limiar_franco_kpa": 22, "limiar_franco_argiloso_kpa": 28, "limiar_argiloso_kpa": 30, "fonte": "Embrapa Hortaliças / FAO-56"}
+]
+
+
 def carregar_seed_se_vazio() -> None:
-    """Popula os perfis Embrapa e histórico de 7 dias se a tabela estiver vazia."""
+    """Popula os perfis Embrapa, solos e matriz fenológica se vazios."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -95,6 +165,31 @@ def carregar_seed_se_vazio() -> None:
 
         if total_perfis == 0:
             resetar_dados_demonstracao()
+
+        cursor.execute("SELECT COUNT(*) as total FROM solos_van_genuchten")
+        if cursor.fetchone()["total"] == 0:
+            for s in DADOS_VAN_GENUCHTEN:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO solos_van_genuchten (
+                        classe, theta_r, theta_s, alpha, n, m, cc_kpa, pmp_kpa
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (s["classe"], s["theta_r"], s["theta_s"], s["alpha"], s["n"], s["m"], s["cc_kpa"], s["pmp_kpa"]))
+
+        cursor.execute("SELECT COUNT(*) as total FROM fases_cultura")
+        if cursor.fetchone()["total"] == 0:
+            for f in DADOS_FASES_CULTURA:
+                cursor.execute("""
+                    INSERT INTO fases_cultura (
+                        cultura_id, fase, raiz_mm, kc,
+                        limiar_arenoso_kpa, limiar_franco_arenoso_kpa, limiar_franco_kpa,
+                        limiar_franco_argiloso_kpa, limiar_argiloso_kpa, fonte
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    f["cultura_id"], f["fase"], f["raiz_mm"], f["kc"],
+                    f["limiar_arenoso_kpa"], f["limiar_franco_arenoso_kpa"], f["limiar_franco_kpa"],
+                    f["limiar_franco_argiloso_kpa"], f["limiar_argiloso_kpa"], f["fonte"]
+                ))
+        conn.commit()
 
 
 def resetar_dados_demonstracao() -> Dict[str, Any]:
@@ -237,3 +332,22 @@ def registrar_alerta_banco(
         ))
         conn.commit()
         return cursor.lastrowid
+
+
+def obter_solos_van_genuchten() -> List[Dict[str, Any]]:
+    """Retorna os parâmetros hidráulicos de Van Genuchten das 11 classes texturais."""
+    with obter_conexao() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM solos_van_genuchten ORDER BY cc_kpa ASC")
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def obter_fases_cultura(cultura_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retorna as fases fenológicas, profundidade de raiz, Kc e limites por solo."""
+    with obter_conexao() as conn:
+        cursor = conn.cursor()
+        if cultura_id:
+            cursor.execute("SELECT * FROM fases_cultura WHERE cultura_id = ? ORDER BY id ASC", (cultura_id,))
+        else:
+            cursor.execute("SELECT * FROM fases_cultura ORDER BY cultura_id, id ASC")
+        return [dict(r) for r in cursor.fetchall()]

@@ -10,6 +10,16 @@ static const uint8_t PIN_SENSOR_UMIDADE = 34;
 static const uint8_t PIN_SENSOR_2 = 32;
 static const uint8_t CANAL_ESPNOW = 1;
 static const uint32_t INTERVALO_ENVIO_MS = 1000;
+static const int NUM_AMOSTRAS_ADC = 16;
+
+static uint16_t lerAdcComSobreamostragem(uint8_t pino) {
+  uint32_t soma = 0;
+  for (int i = 0; i < NUM_AMOSTRAS_ADC; i++) {
+    soma += analogRead(pino);
+    delay(2);
+  }
+  return (uint16_t)(soma / NUM_AMOSTRAS_ADC);
+}
 
 static const uint8_t MAC_BROADCAST[6] = {
   0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
@@ -44,6 +54,8 @@ void setup() {
   Serial.println("Transmissor ESP-NOW de sensores");
 
   analogReadResolution(12);
+  analogSetPinAttenuation(PIN_SENSOR_UMIDADE, ADC_11db);
+  analogSetPinAttenuation(PIN_SENSOR_2, ADC_11db);
   pinMode(PIN_SENSOR_UMIDADE, INPUT);
   pinMode(PIN_SENSOR_2, INPUT);
 
@@ -103,8 +115,8 @@ void loop() {
   }
 
   DadosSensores dados;
-  dados.sensorUmidadeGPIO34 = (uint16_t)analogRead(PIN_SENSOR_UMIDADE);
-  dados.sensor2GPIO32 = (uint16_t)analogRead(PIN_SENSOR_2);
+  dados.sensorUmidadeGPIO34 = lerAdcComSobreamostragem(PIN_SENSOR_UMIDADE);
+  dados.sensor2GPIO32 = lerAdcComSobreamostragem(PIN_SENSOR_2);
 
   Serial.printf(
     "Local | sensor de umidade GPIO34 (bruto): %u | sensor 2 GPIO32 (bruto): %u\n",

@@ -69,6 +69,14 @@ SOLOS_INFO = {
         "estresse_kpa": 30.0,
         "descricao": "Drena rápido por gravidade. Estresse hídrico inicia cedo (30 kPa). Irrigação mais frequente."
     },
+    "franco_arenoso": {
+        "id": "franco_arenoso",
+        "nome": "Solo Franco-Arenoso (Médio-Leve)",
+        "icone": "🌾",
+        "cc_kpa": 15.0,
+        "estresse_kpa": 40.0,
+        "descricao": "Textura média leve com boa drenagem e aeração equilibrada."
+    },
     "franco": {
         "id": "franco",
         "nome": "Solo Franco / Médio",

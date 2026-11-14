@@ -195,3 +195,61 @@ def classificar_estado_hidrico_solo(tensao_kpa: float, tipo_solo: str = "franco"
             "risco_hipoxia": False
         }
 
+
+def calcular_van_genuchten(h_kpa: float, classe: str = "Franco (Loam)") -> Dict[str, Any]:
+    """
+    Calcula a umidade volumétrica θ(h) segundo a equação de Van Genuchten (1980):
+    θ(h) = θr + (θs - θr) / [1 + (α * |h|)^n]^m, onde m = 1 - 1/n.
+    """
+    try:
+        from database import DADOS_VAN_GENUCHTEN
+    except ImportError:
+        from backend.database import DADOS_VAN_GENUCHTEN
+
+    h = max(0.0, float(h_kpa))
+    solo = next((s for s in DADOS_VAN_GENUCHTEN if s["classe"].lower() == classe.lower()), None)
+    if not solo:
+        solo = DADOS_VAN_GENUCHTEN[3]  # Franco default
+
+    theta_r = solo["theta_r"]
+    theta_s = solo["theta_s"]
+    alpha = solo["alpha"]
+    n = solo["n"]
+    m = solo["m"]
+
+    if h == 0.0:
+        theta = theta_s
+    else:
+        denominador = (1.0 + (alpha * h) ** n) ** m
+        theta = theta_r + ((theta_s - theta_r) / denominador)
+
+    umidade_pct = round(theta * 100.0, 1)
+    return {
+        "classe": solo["classe"],
+        "tensao_kpa": h,
+        "theta": round(theta, 4),
+        "umidade_volumetrica_pct": umidade_pct,
+        "theta_r": theta_r,
+        "theta_s": theta_s,
+        "alpha": alpha,
+        "n": n,
+        "m": m
+    }
+
+
+def calcular_lamina_irrigacao(et0: float = 4.0, kc: float = 1.0) -> Dict[str, float]:
+    """
+    Calcula a evapotranspiração da cultura (ETc = ET0 * Kc) segundo FAO-56.
+    1 mm de lâmina = 1 L/m² = 10.000 L/ha.
+    """
+    et0_val = max(0.1, float(et0))
+    kc_val = max(0.1, float(kc))
+    etc = round(et0_val * kc_val, 2)
+    return {
+        "et0_mm_dia": et0_val,
+        "kc": kc_val,
+        "lamina_mm_dia": etc,
+        "litros_por_m2": etc,
+        "litros_por_hectare": round(etc * 10000.0, 1)
+    }
+

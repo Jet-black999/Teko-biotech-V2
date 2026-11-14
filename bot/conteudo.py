@@ -13,10 +13,11 @@ BTN_SOLO = "🚜 6. Tipo de Solo da Lavoura"
 
 RESPOSTA_SOLO_MENU = (
     "🚜 <b>Qual é o tipo de solo da sua lavoura?</b>\n\n"
-    "A textura da terra muda a força com que a água fica retida nas raízes:\n\n"
-    "• <b>🏖️ Solo Arenoso:</b> Drena muito rápido (como um coador). Em 30 kPa já precisa irrigar!\n"
-    "• <b>🌾 Solo Franco (Médio):</b> Equilibrado. Ponto de irrigação aos 45 kPa.\n"
-    "• <b>🧱 Solo Argiloso:</b> Terra roxa de várzea. Segura muita água; em 33 kPa ainda tem água de sobra!\n\n"
+    "A textura da terra muda a retenção de água e a tensão de manejo (Embrapa / Van Genuchten):\n\n"
+    "• <b>🏖️ Solo Arenoso:</b> Drena muito rápido (como um coador). Em 20 a 30 kPa já precisa irrigar!\n"
+    "• <b>🌾 Solo Franco-Arenoso:</b> Textura média-leve. Ponto de irrigação entre 25 e 45 kPa.\n"
+    "• <b>🌱 Solo Franco (Médio):</b> Equilibrado. Ponto de irrigação entre 35 e 55 kPa.\n"
+    "• <b>🧱 Solo Argiloso:</b> Terra roxa e várzea. Segura muita água; suporta até 50 a 65 kPa!\n\n"
     "👇 <b>Toque abaixo no solo do seu talhão para calibrar o biossensor Tekó:</b>"
 )
 
