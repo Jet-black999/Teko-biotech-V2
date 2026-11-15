@@ -110,11 +110,13 @@ async def lifespan(app: FastAPI):
         await inicializar_llm_engine()
     except Exception as exc:
         print(f"[LLM Engine] Inicialização do motor LLM: {exc}")
-    yield
     try:
-        await fechar_llm_engine()
-    except Exception as exc:
-        print(f"[LLM Engine] Encerramento do motor LLM: {exc}")
+        yield
+    finally:
+        try:
+            await fechar_llm_engine()
+        except Exception as exc:
+            print(f"[LLM Engine] Encerramento do motor LLM: {exc}")
 
 
 app = FastAPI(
