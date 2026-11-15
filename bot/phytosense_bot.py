@@ -34,7 +34,12 @@ from telebot.types import (
 
 import conteudo as c
 from roteamento import rotear
-from telemetria import DADOS_ESTADOS, obter_telemetria_tempo_real
+from telemetria import DADOS_ESTADOS, obter_telemetria_tempo_real, obter_diagnostico_llm
+from audio_processor import (
+    validar_metadados_audio,
+    inspecionar_container_ogg,
+    gerenciador_audio_temporario
+)
 
 load_dotenv(os.path.join(_bot_dir, ".env"))
 load_dotenv(os.path.join(_bot_dir, "..", ".env"))
@@ -186,8 +191,76 @@ def send_welcome(message):
 
 @bot.message_handler(content_types=["voice", "audio"])
 def handle_voice(message):
-    """Recepção orientando para o modo Zero Digitação (Opção 2)."""
-    bot.send_message(message.chat.id, c.AUDIO_RESPOSTA, reply_markup=main_menu_keyboard())
+    """
+    Processa mensagem de voz com validação prévia de metadados, inspeção Ogg/Opus
+    e geração de resposta agronômica fitoeletrônica via LLM local / Fallback.
+    """
+    audio_obj = getattr(message, "voice", None) or getattr(message, "audio", None)
+    if not audio_obj:
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Nenhum áudio detectado na mensagem.",
+            reply_markup=main_menu_keyboard()
+        )
+        return
+
+    # Passo 1: Validação prévia de metadados (SEM download de arquivo)
+    duration = getattr(audio_obj, "duration", None)
+    file_size = getattr(audio_obj, "file_size", None)
+    valido, motivo = validar_metadados_audio(duration, file_size)
+    if not valido:
+        bot.send_message(
+            message.chat.id,
+            f"⚠️ <b>Áudio não aceito:</b> {motivo}\n\n"
+            "💡 <i>Dica: Grave áudios curtos de até 2 minutos para receber o diagnóstico instantâneo.</i>",
+            reply_markup=main_menu_keyboard()
+        )
+        return  # Sai sem invocar get_file nem download_file
+
+    # Passo 2: Download controlado dentro de gerenciador temporário
+    bot.send_chat_action(message.chat.id, "typing")
+    try:
+        file_id = getattr(audio_obj, "file_id", None)
+        file_info = bot.get_file(file_id)
+        downloaded = bot.download_file(file_info.file_path)
+
+        with gerenciador_audio_temporario(downloaded) as caminho_tmp:
+            # Passo 3: Inspeção pura Python do container Ogg/Opus
+            inspecao = inspecionar_container_ogg(caminho_tmp)
+            if not inspecao["valido"]:
+                bot.send_message(
+                    message.chat.id,
+                    f"⚠️ <b>Formato de áudio não suportado:</b> {inspecao.get('erro', 'Arquivo incompatível')}\n"
+                    "O Tekó processa notas de voz padrão do Telegram (.ogg com codec Opus).",
+                    reply_markup=main_menu_keyboard()
+                )
+                return
+
+            # Passo 4: Coleta de telemetria e diagnóstico fitoeletrônico
+            solo_pref = _preferencia_solo.get(message.chat.id, "franco")
+            telemetria = obter_telemetria_tempo_real(tipo_solo=solo_pref)
+            diagnostico = obter_diagnostico_llm(
+                telemetria=telemetria,
+                pergunta="Mensagem de voz recebida: solicitação de diagnóstico da lavoura"
+            )
+
+            # Passo 5: Resposta textual estruturada ao produtor
+            taxa_hz = inspecao.get("taxa_amostragem", 48000)
+            duracao_display = duration if duration is not None else int(inspecao.get("duracao_estimada_sec", 0))
+            resposta_texto = (
+                f"🎙️ <b>Áudio Recebido & Processado ({duracao_display}s, {taxa_hz} Hz):</b>\n\n"
+                f"{diagnostico.get('resposta', 'Diagnóstico agronômico processado com sucesso.')}"
+            )
+            bot.send_message(message.chat.id, resposta_texto, reply_markup=main_menu_keyboard())
+
+    except Exception as exc:
+        logger.exception("Erro ao processar áudio de voz")
+        bot.send_message(
+            message.chat.id,
+            "❌ Ocorreu uma instabilidade temporária ao analisar seu áudio. "
+            "Por favor, use os botões rápidos do menu abaixo 👇",
+            reply_markup=main_menu_keyboard()
+        )
 
 
 def responder_telemetria(chat_id, estado="hidratada", dados_reais=None):
