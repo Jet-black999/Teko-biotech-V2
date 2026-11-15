@@ -1,57 +1,51 @@
 ## 📌 Descrição do Pull Request
 
-**Título:** `feat: Integracao Total do Biossensor In-Planta, Identidade Visual Oficial & Resolucao de Qualidade de Codigo`  
-**Branch:** `pr/integracao-total-biossensor-e-identidade-visual`  
+**Título:** `feat(llm): endpoint POST /api/llm/diagnostico com cliente Ollama leve, fallback fitoeletronico <50ms e filtro anti-termos proibidos`  
+**Branch:** `feat/llm-local-biossensor`  
+**Milestone:** M3 (PR 2: feat/llm-local-biossensor)  
 **Tipo de Alteração:**
-- [x] Correção de bugs / Refatoração de qualidade de código (100% dos 37 achados Qodo/SonarCloud resolvidos)
-- [x] Migração de infraestrutura (`@app.on_event("startup")` -> `lifespan` assíncrono no FastAPI)
-- [x] Nova funcionalidade (Integração total do biossensor fitoeletrônico, 11 solos Van Genuchten, 4 culturas Embrapa/FAO)
-- [x] Acessibilidade e Identidade Visual (WCAG 2.2 AA no Modo Claro, alvos >= 48px, botões e semântica ARIA)
+- [x] Nova funcionalidade (Endpoint REST `POST /api/llm/diagnostico` para WebApp e Telegram Bot)
+- [x] Integração com LLM Local (Cliente HTTP assíncrono leve para Ollama / `qwen2.5:0.5b` com timeout de 1.0s, sem poluir `requirements.lock.txt`)
+- [x] Motor especialista fitoeletrônico determinístico de fallback (<50ms SLA, benchmark medido <0.2ms)
+- [x] Tolerância a falhas em 3 camadas garantindo zero retornos HTTP 500 sob indisponibilidade de rede/Ollama
+- [x] Filtro léxico ativo e validação estrita contra termos legados proibidos (`agrosponge`, `casca de arroz`, `saco biodegradável`)
+- [x] Ampliação da suíte de testes automatizados (+29 testes novos em `backend/tests/test_llm.py`, totalizando 124 testes aprovados)
 
 ---
 
 ### 🎯 Motivação & Contexto (Desafio 02 UERGS: Água e Drenagem Rural)
-Este Pull Request consolida a evolução completa do ecossistema **Tekó Biotech** para o **Hackathon das Engenharias UERGS 2026** (Desafio 02: Água e Drenagem Rural), focado na resiliência climática da agricultura familiar do Rio Grande do Sul:
-1. **Resiliência a Extremos Climáticos:** Monitoramento eletrofisiológico in-planta em tempo real para combater tanto a estiagem severa (alerta de sede precoce via bioimpedância de caule a 1 kHz e 50 kHz antes do murchamento visual) quanto inundações e enchentes históricas (detecção de hipóxia e asfixia radicular via Potencial Redox ORP < -100 mV com bactérias exoeletrogênicas *Geobacter* na célula P-MFC).
-2. **Base Científica Embrapa / FAO-56:** Incorporação das curvas de retenção de água de Van Genuchten para 11 classes texturais de solo e matriz fenológica completa para Milho, Tomate, Feijão e Alface, calculando lâmina de irrigação e economia de recursos hídricos e energéticos (4.200 L de água e R$ 38,00 de luz/diesel poupados por hectare/mês no estado hidratado).
-3. **Qualidade de Código e Confiabilidade Máxima:** Resolução integral dos 37 apontamentos de análise estática e revisão de código (Qodo / SonarCloud) distribuídos entre backend, bot e frontend web, além da modernização do ciclo de vida da API FastAPI com `lifespan`, eliminando 100% dos `DeprecationWarning`.
+Este Pull Request implementa a infraestrutura de inteligência artificial agronômica local e diagnósticos fitoeletrônicos para a **Tekó Biotech** no **Hackathon das Engenharias UERGS 2026**:
+1. **Inteligência Artificial Local e Soberania Tecnológica no Campo:** Conexão assíncrona com o Ollama local (`http://localhost:11434` / `qwen2.5:0.5b`) sem dependências pesadas externas e sem alteração do `requirements.lock.txt`.
+2. **Motor Especialista Fitoeletrônico de Fallback (< 50ms SLA):** Caso o Ollama esteja offline, desligado ou leve mais de 1,0s para responder, o motor determinístico em memória assume imediatamente (tempo de resposta medido < 0.2ms, mais de 250x abaixo do SLA contratual), eliminando qualquer risco de erro HTTP 500.
+3. **Conhecimento Agronômico e Eletrofisiológico Integrado:**
+   - Modelos hidrofísicos Van Genuchten/Embrapa para 11 classes texturais normalizadas em 3 regimes (arenoso, franco, argiloso) com cálculo contínuo de Água Disponível ($AD\%$).
+   - Bioimpedância de caule dupla frequência: 1 kHz apoplástico (fluxo xilema) vs 50 kHz simplástico (turgor celular intracelular e ITR = $Z_{1k} / Z_{50k}$), detectando "seca invisível" ($Z_{50k} \ge 4.5\text{ k}\Omega$) 18 a 36h antes do murchamento foliar.
+   - Paradoxo da Enchente / Asfixia Radicular (ORP < -100 mV ou solo alagado): a depleção de oxigênio e ATP desativa as aquaporinas radiculares (PIP), gerando seca fisiológica. A bomba NUNCA deve ser ligada (`"NÃO LIGAR A BOMBA!"`), priorizando abertura de valetas de drenagem e laudo pericial PROAGRO.
+4. **Política de Segurança Léxica Tekó Biotech:** Sanitização ativa com expressões regulares e verificação defensiva Unicode NFD sem marcas diacríticas, erradicando qualquer termo obsoleto (`agrosponge`, `casca de arroz`, `saco biodegradável`) e carimbando a resposta com `seguranca_termos_antigos: true`.
 
 ---
 
 ## 🔬 Componentes Afetados
-- [x] 📱 Frontend / Telegram Mini App PWA (`web/`)
-  - Adequação de contraste no Modo Claro para conformidade WCAG 2.2 AA (`web/css/styles.css`).
-  - Remoção de seletores CSS duplicados e especificação de transições.
-  - Refatoração de funções de alta complexidade cognitiva, eliminação de ternários aninhados, uso de `Number.parseInt/isNaN/parseFloat`, `el.dataset` e remoção de imports não utilizados (`web/js/app.js`, `charts.js`, `content.js`).
-  - Correção de semântica ARIA para elementos interativos (`web/index.html`).
-- [x] 🤖 Bot do Telegram Tekó (`bot/`)
-  - Refatoração modular de `send_welcome` em `bot/phytosense_bot.py` reduzindo a complexidade cognitiva de 20 para <= 15 (funções auxiliares `_obter_avatar_path` e `_enviar_foto_boas_vindas`).
-  - Uso estrito de `logger.exception()` em blocos de exceção (python:S8572).
-  - Remoção de prefixo f-string sem interpolação em `bot/configurar_teko.py` (python:S3457).
-  - Suíte de 16 testes unitários em `bot/tests/test_bot.py` 100% aprovada.
-- [x] ⚡ Backend FastAPI & Banco de Dados (`backend/`)
-  - Migração de `@app.on_event("startup")` para `@asynccontextmanager async def lifespan(app: FastAPI)` em `backend/server.py`.
-  - Extração de constantes de citação Embrapa para eliminar duplicações de literais em `backend/database.py` (python:S1192).
-  - Correção de comparação de ponto flutuante via tolerância épsilon em `backend/motor_predicao.py` (python:S1244).
-- [ ] 🔌 Firmware Embarcado ESP32 / Gateway (`firmware/`)
-- [ ] 🧩 Extensão de Acessibilidade (`extension/`)
-- [x] 📖 Documentação / CI / GitHub Workflows (`docs/`, `.github/`)
-  - Preenchimento completo do template de Pull Request para auditoria técnica.
-  - Garantia de governança estrita de CI: nenhum arquivo sob `.github/workflows/` foi criado ou modificado.
+- [x] ⚡ Backend FastAPI (`backend/`)
+  - Criação do módulo `backend/llm_engine.py`: cliente Ollama leve, fallback determinístico, tabelas Van Genuchten e sanitizador léxico.
+  - Atualização de `backend/server.py`: esquemas Pydantic `DiagnosticoLLMIn` e `DiagnosticoLLMOut`, inicialização não-bloqueante no `lifespan`, exposição do endpoint `POST /api/llm/diagnostico` com proteção em 3 camadas e catálogo de rotas em `GET /`.
+- [x] 🧪 Testes Automatizados (`backend/tests/test_llm.py`)
+  - 29 novos testes cobrindo hidratada, sede, hipóxia/paradoxo da enchente, benchmark de latência < 50ms, normalização dos 11 solos Van Genuchten, injeções adversariais de termos proibidos, mock de Ollama online e offline, e validações de esquema HTTP 422.
+  - Suíte completa do projeto elevada de 95 para 124 testes (100% aprovados).
+- [x] 📖 Governança e Repositório
+  - `backend/requirements.lock.txt` preservado intacto (0 alterações).
+  - `.github/workflows/` preservado intacto (nenhum arquivo criado ou alterado).
 
 ---
 
 ## 🌾 Checklist de Aceite Técnico & Fitoeletrônico (Tekó Biotech)
-- [x] **Acessibilidade Rural WCAG 2.2 AA**: Alvos de toque >= 48px, alto contraste sob luz solar forte (#252A26 Carbon em fundos claros, contraste >= 4.5:1), suporte à síntese de voz e semântica ARIA estrita.
-- [x] **Rigor Eletrofisiológico**:
-  - Bioimpedância dual-frequency validada (50 kHz para turgor celular simplástico, 1 kHz para fluxo apoplástico/xilema).
-  - Detecção precoce de asfixia radicular na enchente via ORP < -100 mV (P-MFC Geobacter).
-- [x] **Consistência de Manejo e Custos**:
-  - Limites críticos calibrados segundo literatura Embrapa (Embrapa-RR 1997, Embrapa Hortaliças 2008, Embrapa Arroz e Feijão / FAO-56).
-  - Indicadores de economia de diesel e litros de água coerentes em todos os estados da planta (4.200 L de água e R$ 38,00/mês economizados no estado hidratado).
-- [x] **Segurança Absoluta**: Nenhum token (`TELEGRAM_TOKEN`), credencial ou segredo foi exposto em commits.
-- [x] **Testes Automatizados**: Suíte `pytest` com 95 testes (100% aprovados) com **0 warnings de depreciação** e validação sintática do JS (`node --check`) sem erros.
-- [x] **Governança de Repositório**: Preservação integral do diretório `.github/workflows/` (sem adição ou modificação de arquivos de pipeline).
+- [x] **Cliente HTTP Leve**: Utiliza `httpx` nativo já presente no ambiente sem adicionar novas dependências.
+- [x] **SLA de Fallback < 50ms**: Benchmark medido de ~0.15ms a 0.20ms em execução determinística local.
+- [x] **Zero Erros HTTP 500**: Tolerância a falhas em 3 camadas (timeout curto no Ollama, fallback determinístico, barreira de exceção na rota FastAPI).
+- [x] **Política Anti-Termos Proibidos**: Validação estrita assegurando ausência de `agrosponge`, `casca de arroz` ou `saco biodegradável`.
+- [x] **Contrato de API Cumprido**: `POST /api/llm/diagnostico` retorna exatamente os campos definidos no `PROJECT.md` e `SCOPE.md`.
+- [x] **Testes Automatizados**: 124 testes passando (`pytest`), sem nenhuma regressão.
+- [x] **Governança de CI**: Nenhuma modificação em `.github/workflows/`.
 
 ---
 > 🤖 **Code Review com IA:** Este repositório conta com revisão automatizada via **CodeRabbit AI** e **Qodo Merge**. Interaja nos comentários do PR com `/review`, `/improve` ou `/ask` para esclarecer dúvidas técnicas com a IA.

@@ -8,7 +8,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 import httpx
 from dotenv import load_dotenv
@@ -36,6 +36,12 @@ try:
         calcular_van_genuchten,
         calcular_lamina_irrigacao
     )
+    from llm_engine import (
+        processar_diagnostico_llm,
+        inicializar_llm_engine,
+        fechar_llm_engine,
+        executar_diagnostico_fallback
+    )
 except ImportError:
     from backend.database import (
         inicializar_banco,
@@ -55,6 +61,12 @@ except ImportError:
         classificar_estado_hidrico_solo,
         calcular_van_genuchten,
         calcular_lamina_irrigacao
+    )
+    from backend.llm_engine import (
+        processar_diagnostico_llm,
+        inicializar_llm_engine,
+        fechar_llm_engine,
+        executar_diagnostico_fallback
     )
 
 # Carrega variáveis de ambiente procurando em múltiplos caminhos do projeto
@@ -94,7 +106,15 @@ async def lifespan(app: FastAPI):
         print("[SQLite] Banco de dados e perfis Embrapa inicializados com sucesso.")
     except Exception as exc:
         print(f"[SQLite Init] Falha ao inicializar banco: {exc}")
+    try:
+        await inicializar_llm_engine()
+    except Exception as exc:
+        print(f"[LLM Engine] Inicialização do motor LLM: {exc}")
     yield
+    try:
+        await fechar_llm_engine()
+    except Exception as exc:
+        print(f"[LLM Engine] Encerramento do motor LLM: {exc}")
 
 
 app = FastAPI(
@@ -183,6 +203,27 @@ class GatewayPacoteIn(BaseModel):
     temp_c: Optional[float] = Field(default=24.5, description="Temperatura do solo em °C")
     bateria_mv: Optional[int] = Field(default=3300, description="Tensão da bateria em mV")
     rssi_espnow: Optional[int] = Field(default=-65, description="Intensidade do rádio ESP-NOW em dBm")
+
+
+class DiagnosticoLLMIn(BaseModel):
+    tensao_kpa: float = Field(..., ge=0.0, le=250.0, description="Potencial matricial Ψm em kPa")
+    tipo_solo: Optional[str] = Field(default="franco", description="Tipo de solo (arenoso, franco ou argiloso)")
+    z_50k_ohms: Optional[float] = Field(default=1400.0, description="Bioimpedância simplástica a 50 kHz em Ohms")
+    z_1k_ohms: Optional[float] = Field(default=1200.0, description="Bioimpedância apoplástica a 1 kHz em Ohms")
+    orp_mv: Optional[float] = Field(default=310.0, description="Potencial Redox da rizosfera em mV")
+    cultura: Optional[str] = Field(default="Milho", description="Cultura vegetal analisada")
+    pergunta: Optional[str] = Field(default=None, description="Pergunta ou dúvida enviada pelo produtor rural")
+
+
+class DiagnosticoLLMOut(BaseModel):
+    status: str = Field(default="sucesso", description="Status do retorno ('sucesso')")
+    estado_planta: Literal["hidratada", "sede", "hipoxia"] = Field(..., description="Estado eletrofisiológico da planta")
+    bomba_status: Literal["BOMBA DESLIGADA", "LIGAR AMANHÃ ÀS 06H", "NÃO LIGAR A BOMBA!"] = Field(..., description="Comando acionador para o manejo da irrigação")
+    tempo_resposta_ms: float = Field(..., description="Tempo total de resposta da inferência em milissegundos")
+    motor_utilizado: Literal["ollama_local", "motor_especialista_fallback"] = Field(..., description="Identificação do motor que gerou o parecer")
+    diagnostico_texto: str = Field(..., description="Diagnóstico agronômico contextualizado")
+    recomendacao_manejo: str = Field(..., description="Recomendação prática de campo")
+    seguranca_termos_antigos: bool = Field(default=True, description="Conformidade estrita com a política anti-termos proibidos")
 
 
 # ============================================================================
@@ -661,7 +702,8 @@ def raiz():
             "/api/telemetria (POST)",
             "/api/telemetria/atual (GET)",
             "/api/telemetria/historico (GET)",
-            "/api/telemetria/simular (POST)"
+            "/api/telemetria/simular (POST)",
+            "/api/llm/diagnostico (POST)"
         ]
     }
 
@@ -1242,3 +1284,37 @@ def resetar_demonstracao():
         "sucesso": True,
         "resultado": res
     }
+
+
+@app.post(
+    "/api/llm/diagnostico",
+    response_model=DiagnosticoLLMOut,
+    tags=["Inteligência Artificial & Fitoeletrônica"],
+    summary="Gera parecer agronômico via LLM Local (Ollama) ou Motor Especialista de Fallback"
+)
+async def rota_diagnostico_llm(dados: DiagnosticoLLMIn):
+    """
+    Endpoint de alta resiliência para diagnóstico fitoeletrônico in-planta.
+    Consome dados de tensiometria (Van Genuchten), bioimpedância e ORP.
+    Tenta Ollama local (qwen2.5:0.5b); sob indisponibilidade ou timeout > 1.0s,
+    aciona instantaneamente o motor especialista determinístico (<50ms SLA).
+    Zero tolerância para termos legados proibidos. Nunca retorna erro 500.
+    """
+    t_inicio = time.perf_counter()
+    try:
+        resultado = await processar_diagnostico_llm(dados, t_inicio=t_inicio)
+        return DiagnosticoLLMOut(**resultado)
+    except Exception as exc:
+        print(f"[LLM Router] Falha não interceptada: {exc}. Acionando fallback determinístico de emergência.")
+        fallback = executar_diagnostico_fallback(
+            tensao_kpa=dados.tensao_kpa,
+            tipo_solo=dados.tipo_solo or "franco",
+            z_50k_ohms=dados.z_50k_ohms or 1400.0,
+            z_1k_ohms=dados.z_1k_ohms or 1200.0,
+            orp_mv=dados.orp_mv or 310.0,
+            cultura=dados.cultura or "Milho",
+            pergunta=dados.pergunta,
+            t_inicio=t_inicio
+        )
+        return DiagnosticoLLMOut(**fallback)
+
