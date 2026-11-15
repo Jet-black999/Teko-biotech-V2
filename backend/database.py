@@ -202,7 +202,8 @@ def resetar_dados_demonstracao() -> Dict[str, Any]:
     Restaura o SQLite para o estado original da demonstração de 5 minutos,
     populando 7 dias de histórico e os perfis Embrapa.
     """
-    inicializar_banco()
+    if not _banco_inicializado:
+        inicializar_banco()
     if not os.path.exists(SEED_PATH):
         return {"status": "erro", "mensagem": "Arquivo seed_demo_data.json não encontrado"}
 
