@@ -97,9 +97,11 @@ def test_roteamento_palavras_chave():
 def test_solos_info_existencia():
     from telemetria import SOLOS_INFO
     assert "arenoso" in SOLOS_INFO
+    assert "franco_arenoso" in SOLOS_INFO
     assert "franco" in SOLOS_INFO
     assert "argiloso" in SOLOS_INFO
     assert SOLOS_INFO["arenoso"]["cc_kpa"] == 10.0
+    assert SOLOS_INFO["franco_arenoso"]["cc_kpa"] == 15.0
     assert SOLOS_INFO["argiloso"]["cc_kpa"] == 33.0
 
 

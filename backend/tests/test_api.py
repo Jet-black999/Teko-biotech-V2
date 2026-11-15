@@ -358,9 +358,9 @@ def test_endpoint_telemetria_adc_gatilho_caetano():
 def test_classificacao_fisica_solo_tabela_embrapa():
     from backend.motor_predicao import classificar_estado_hidrico_solo
 
-    # Saturação (0 kPa) -> Falta de oxigênio / risco de hipóxia
+    # Saturado (0 kPa) -> Falta de oxigênio / risco de hipóxia
     sat = classificar_estado_hidrico_solo(0.0, "franco")
-    assert sat["estado_hidrico"] == "Saturação"
+    assert sat["estado_hidrico"] == "Saturado"
     assert sat["agua_disponivel_pct"] == 100
     assert "falta de oxigênio" in sat["condicao_planta"]
     assert sat["risco_hipoxia"] is True
@@ -452,5 +452,54 @@ def test_endpoint_clima_previsao():
     assert "recomendacao_manejo" in res
     assert isinstance(res["alerta_suspensao_irrigacao"], bool)
     assert isinstance(res["alerta_vendaval"], bool)
+
+
+def test_solos_van_genuchten_endpoints():
+    from backend.server import listar_solos_van_genuchten, calcular_retencao_solo
+
+    res = listar_solos_van_genuchten()
+    assert res["total"] == 11
+    assert len(res["solos"]) == 11
+    
+    classes = [s["classe"] for s in res["solos"]]
+    assert any("Areia" in c for c in classes)
+    assert any("Franco (Loam)" in c for c in classes)
+    assert any("Argiloso" in c for c in classes)
+
+    # Verifica cálculo de Van Genuchten na saturação (h = 0)
+    sat = calcular_retencao_solo(h_kpa=0.0, classe="Franco (Loam)")
+    assert sat["theta"] == sat["theta_s"]
+    assert sat["umidade_volumetrica_pct"] == round(sat["theta_s"] * 100.0, 1)
+
+    # Verifica cálculo a 25 kPa (Capacidade de Campo típica)
+    cc = calcular_retencao_solo(h_kpa=25.0, classe="Franco (Loam)")
+    assert cc["theta_r"] < cc["theta"] < cc["theta_s"]
+    assert cc["umidade_volumetrica_pct"] > 0
+
+
+def test_fases_cultura_endpoints():
+    from backend.server import listar_fases_cultura
+
+    res_todas = listar_fases_cultura()
+    assert res_todas["total"] >= 16
+    assert res_todas["cultura_filtro"] is None
+
+    # Filtro específico para Milho (5 fases na tabela)
+    res_milho = listar_fases_cultura(cultura="milho")
+    assert res_milho["total"] == 5
+    assert all(f["cultura_id"] == "milho" for f in res_milho["fases"])
+    assert res_milho["fases"][0]["raiz_mm"] == 150
+    assert res_milho["fases"][2]["kc"] == 1.13
+
+
+def test_calculo_lamina_irrigacao_fao():
+    from backend.server import calcular_lamina_endpoint
+
+    res = calcular_lamina_endpoint(et0=4.0, kc=1.13)
+    assert res["et0_mm_dia"] == 4.0
+    assert res["kc"] == 1.13
+    assert res["lamina_mm_dia"] == 4.52
+    assert res["litros_por_m2"] == 4.52
+    assert res["litros_por_hectare"] == 45200.0
 
 

@@ -8,13 +8,22 @@ Foco em Zero Digitação e acessibilidade para o pequeno produtor do Rio Grande 
 
 import os
 import sys
+import logging
 
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
 if _bot_dir not in sys.path:
     sys.path.insert(0, _bot_dir)
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("teko_bot")
+
 import telebot
+from telebot import apihelper
 from dotenv import load_dotenv
+
+apihelper.CONNECT_TIMEOUT = 30
+apihelper.READ_TIMEOUT = 60
+apihelper.RETRY_ON_ERROR = True
 from telebot.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -25,14 +34,19 @@ from telebot.types import (
 
 import conteudo as c
 from roteamento import rotear
-from telemetria import DADOS_ESTADOS, obter_telemetria_tempo_real
+from telemetria import DADOS_ESTADOS, obter_telemetria_tempo_real, obter_diagnostico_llm
+from audio_processor import (
+    validar_metadados_audio,
+    inspecionar_container_ogg,
+    gerenciador_audio_temporario
+)
 
 load_dotenv(os.path.join(_bot_dir, ".env"))
 load_dotenv(os.path.join(_bot_dir, "..", ".env"))
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://brunoluiztv.github.io/PROJETO-HACKATON-2026/?v=18").rstrip("/")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://brunoluiztv.github.io/PROJETO-HACKATON-2026/?v=21").rstrip("/")
 
 TAG_SENSOR_ONLINE = "📡 <b>[SENSOR FÍSICO ESP32 ONLINE — GPIO 34]</b>\n"
 _preferencia_solo = {}
@@ -45,7 +59,7 @@ bot = telebot.TeleBot(TOKEN or "0:invalido", parse_mode="HTML")
 
 def main_menu_keyboard():
     """Teclado fixo gigante na base do Telegram (Zero Digitação para o Agricultor)."""
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     btn_status = KeyboardButton(c.BTN_PLANTA)
     btn_bomba = KeyboardButton(c.BTN_BOMBA)
     btn_chuva = KeyboardButton(c.BTN_CHUVA)
@@ -61,12 +75,30 @@ def main_menu_keyboard():
     return markup
 
 
+def inline_welcome_keyboard():
+    """Botões rápidos aninhados à mensagem de boas-vindas."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🌱 Minha Planta", callback_data="cmd_planta"),
+        InlineKeyboardButton("💧 Irrigar Hoje?", callback_data="cmd_bomba"),
+    )
+    markup.add(
+        InlineKeyboardButton("🌧️ Raiz & Drenagem", callback_data="cmd_chuva"),
+        InlineKeyboardButton("🚜 Tipo de Solo", callback_data="cmd_solo"),
+    )
+    markup.add(
+        InlineKeyboardButton("📱 Abrir Painel Tekó (Web)", web_app=WebAppInfo(url=WEBAPP_URL)),
+    )
+    return markup
+
+
 def inline_soil_keyboard():
     """Botões para selecionar a textura do solo do talhão."""
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("🏖️ Solo Arenoso (Praia / Litoral - CC: 10 kPa)", callback_data="set_solo_arenoso"),
-        InlineKeyboardButton("🌾 Solo Franco / Médio (Equilibrado - CC: 22 kPa)", callback_data="set_solo_franco"),
+        InlineKeyboardButton("🌾 Solo Franco-Arenoso (Médio-Leve - CC: 15 kPa)", callback_data="set_solo_franco_arenoso"),
+        InlineKeyboardButton("🌱 Solo Franco / Médio (Equilibrado - CC: 22 kPa)", callback_data="set_solo_franco"),
         InlineKeyboardButton("🧱 Solo Argiloso (Terra Roxa - CC: 33 kPa)", callback_data="set_solo_argiloso")
     )
     return markup
@@ -84,29 +116,151 @@ def inline_plant_state_keyboard():
     return markup
 
 
+_cached_avatar_file_id = None
+
+
+def _obter_avatar_path():
+    """Localiza o arquivo de imagem do avatar do Tekó disponível em assets."""
+    for nome_arquivo in ("teko_bot_avatar_512.png", "bot_avatar_hackathon.png"):
+        caminho = os.path.join(_bot_dir, "assets", nome_arquivo)
+        if os.path.exists(caminho):
+            return caminho
+    return None
+
+
+def _enviar_foto_boas_vindas(chat_id: int, texto: str) -> bool:
+    """Tenta enviar a foto de boas-vindas usando file_id em cache ou arquivo local."""
+    global _cached_avatar_file_id
+    if _cached_avatar_file_id:
+        try:
+            bot.send_photo(
+                chat_id,
+                photo=_cached_avatar_file_id,
+                caption=texto,
+                reply_markup=inline_welcome_keyboard()
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Erro ao reenviar foto com file_id: {e}")
+
+    avatar_path = _obter_avatar_path()
+    if not avatar_path:
+        return False
+
+    try:
+        with open(avatar_path, "rb") as photo:
+            res = bot.send_photo(
+                chat_id,
+                photo=photo,
+                caption=texto,
+                reply_markup=inline_welcome_keyboard()
+            )
+            if res and res.photo:
+                _cached_avatar_file_id = res.photo[-1].file_id
+        return True
+    except Exception as e:
+        logger.warning(f"Erro ao enviar foto de boas-vindas: {e}")
+        return False
+
+
 @bot.message_handler(commands=["start", "ajuda"])
 def send_welcome(message):
     nome = message.from_user.first_name or "amigo(a) produtor(a)"
-    avatar_path = os.path.join(_bot_dir, "assets", "bot_avatar_hackathon.png")
-    if os.path.exists(avatar_path):
+    texto_boas_vindas = c.BOAS_VINDAS.format(nome=nome)
+
+    enviou_foto = _enviar_foto_boas_vindas(message.chat.id, texto_boas_vindas)
+    if not enviou_foto:
         try:
-            with open(avatar_path, "rb") as photo:
-                bot.send_photo(
-                    message.chat.id,
-                    photo=photo,
-                    caption=c.BOAS_VINDAS.format(nome=nome),
-                    reply_markup=main_menu_keyboard()
-                )
-                return
-        except Exception as e:
-            logger.warning(f"Erro ao enviar foto de boas-vindas: {e}")
-    bot.send_message(message.chat.id, c.BOAS_VINDAS.format(nome=nome), reply_markup=main_menu_keyboard())
+            bot.send_message(
+                message.chat.id,
+                texto_boas_vindas,
+                reply_markup=inline_welcome_keyboard()
+            )
+        except Exception:
+            logger.exception("Erro ao enviar texto de boas-vindas")
+
+    try:
+        bot.send_message(
+            message.chat.id,
+            "🌾 <b>Teclado do Produtor Ativado:</b> Toque nos botões abaixo a qualquer momento 👇",
+            reply_markup=main_menu_keyboard()
+        )
+    except Exception:
+        logger.exception("Erro ao enviar teclado fixo")
 
 
 @bot.message_handler(content_types=["voice", "audio"])
 def handle_voice(message):
-    """Recepção orientando para o modo Zero Digitação (Opção 2)."""
-    bot.send_message(message.chat.id, c.AUDIO_RESPOSTA, reply_markup=main_menu_keyboard())
+    """
+    Processa mensagem de voz com validação prévia de metadados, inspeção Ogg/Opus
+    e geração de resposta agronômica fitoeletrônica via LLM local / Fallback.
+    """
+    audio_obj = getattr(message, "voice", None) or getattr(message, "audio", None)
+    if not audio_obj:
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Nenhum áudio detectado na mensagem.",
+            reply_markup=main_menu_keyboard()
+        )
+        return
+
+    # Passo 1: Validação prévia de metadados (SEM download de arquivo)
+    duration = getattr(audio_obj, "duration", None)
+    file_size = getattr(audio_obj, "file_size", None)
+    valido, motivo = validar_metadados_audio(duration, file_size)
+    if not valido:
+        bot.send_message(
+            message.chat.id,
+            f"⚠️ <b>Áudio não aceito:</b> {motivo}\n\n"
+            "💡 <i>Dica: Grave áudios curtos de até 2 minutos para receber o diagnóstico instantâneo.</i>",
+            reply_markup=main_menu_keyboard()
+        )
+        return  # Sai sem invocar get_file nem download_file
+
+    # Passo 2: Download controlado dentro de gerenciador temporário
+    bot.send_chat_action(message.chat.id, "typing")
+    try:
+        file_id = getattr(audio_obj, "file_id", None)
+        file_info = bot.get_file(file_id)
+        downloaded = bot.download_file(file_info.file_path)
+
+        with gerenciador_audio_temporario(downloaded) as caminho_tmp:
+            # Passo 3: Inspeção pura Python do container Ogg/Opus
+            inspecao = inspecionar_container_ogg(caminho_tmp)
+            if not inspecao["valido"]:
+                bot.send_message(
+                    message.chat.id,
+                    f"⚠️ <b>Formato de áudio não suportado:</b> {inspecao.get('erro', 'Arquivo incompatível')}\n"
+                    "O Tekó processa notas de voz padrão do Telegram (.ogg com codec Opus).",
+                    reply_markup=main_menu_keyboard()
+                )
+                return
+
+            # Passo 4: Coleta de telemetria e diagnóstico fitoeletrônico
+            solo_pref = _preferencia_solo.get(message.chat.id, "franco")
+            telemetria = obter_telemetria_tempo_real(tipo_solo=solo_pref)
+            diagnostico = obter_diagnostico_llm(
+                telemetria=telemetria,
+                pergunta="Mensagem de voz recebida: solicitação de diagnóstico da lavoura"
+            )
+
+            # Passo 5: Resposta textual estruturada ao produtor
+            taxa_hz = inspecao.get("taxa_amostragem", 48000)
+            duracao_display = duration if duration is not None else int(inspecao.get("duracao_estimada_sec", 0))
+            resposta_texto = (
+                f"🎙️ <b>Áudio Recebido & Processado ({duracao_display}s, {taxa_hz} Hz):</b>\n\n"
+                f"{diagnostico.get('resposta', 'Diagnóstico agronômico processado com sucesso.')}"
+            )
+            bot.send_message(message.chat.id, resposta_texto, reply_markup=main_menu_keyboard())
+
+    except Exception:
+        logger.exception("Erro ao processar áudio de voz")
+        bot.send_message(
+            message.chat.id,
+            "❌ Ocorreu uma instabilidade temporária ao analisar seu áudio. "
+            "Por favor, use os botões rápidos do menu abaixo 👇",
+            reply_markup=main_menu_keyboard()
+        )
 
 
 def responder_telemetria(chat_id, estado="hidratada", dados_reais=None):
@@ -192,6 +346,7 @@ def callback_solo(call):
 
     nomes = {
         "arenoso": "Solo Arenoso (Leve / Litoral)",
+        "franco_arenoso": "Solo Franco-Arenoso (Médio-Leve)",
         "franco": "Solo Franco / Médio",
         "argiloso": "Solo Argiloso (Terra Roxa / Várzea)"
     }
@@ -219,6 +374,23 @@ def callback_estados(call):
     estado = call.data.replace("estado_", "")
     bot.answer_callback_query(call.id, "Lendo bioimpedância da planta...")
     responder_telemetria(call.message.chat.id, estado=estado)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cmd_"))
+def callback_cmd(call):
+    cmd = call.data.replace("cmd_", "")
+    bot.answer_callback_query(call.id)
+    solo_pref = _preferencia_solo.get(call.message.chat.id, "franco")
+    tele = obter_telemetria_tempo_real(tipo_solo=solo_pref)
+    estado = tele.get("estado", "hidratada")
+    if cmd == "planta":
+        responder_telemetria(call.message.chat.id, estado=estado, dados_reais=tele)
+    elif cmd == "bomba":
+        responder_telemetria(call.message.chat.id, estado=estado, dados_reais=tele)
+    elif cmd == "chuva":
+        _responder_chuva(call.message.chat.id, tele, estado)
+    elif cmd == "solo":
+        bot.send_message(call.message.chat.id, c.RESPOSTA_SOLO_MENU, reply_markup=inline_soil_keyboard())
 
 
 @bot.message_handler(commands=["planta", "status"])

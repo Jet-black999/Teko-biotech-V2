@@ -6,8 +6,9 @@ Hackathon das Engenharias UERGS 2026 — Desafio 02: Água e Drenagem Rural
 import os
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 import httpx
 from dotenv import load_dotenv
@@ -23,13 +24,23 @@ try:
         obter_perfil_por_id,
         obter_historico_leituras as obter_historico_sqlite,
         salvar_nova_leitura,
-        registrar_alerta_banco
+        registrar_alerta_banco,
+        obter_solos_van_genuchten,
+        obter_fases_cultura
     )
     from motor_predicao import (
         adc_para_kpa_simulado,
         calcular_taxa_secagem,
         prever_estresse_hidrico,
-        classificar_estado_hidrico_solo
+        classificar_estado_hidrico_solo,
+        calcular_van_genuchten,
+        calcular_lamina_irrigacao
+    )
+    from llm_engine import (
+        processar_diagnostico_llm,
+        inicializar_llm_engine,
+        fechar_llm_engine,
+        executar_diagnostico_fallback
     )
 except ImportError:
     from backend.database import (
@@ -39,13 +50,23 @@ except ImportError:
         obter_perfil_por_id,
         obter_historico_leituras as obter_historico_sqlite,
         salvar_nova_leitura,
-        registrar_alerta_banco
+        registrar_alerta_banco,
+        obter_solos_van_genuchten,
+        obter_fases_cultura
     )
     from backend.motor_predicao import (
         adc_para_kpa_simulado,
         calcular_taxa_secagem,
         prever_estresse_hidrico,
-        classificar_estado_hidrico_solo
+        classificar_estado_hidrico_solo,
+        calcular_van_genuchten,
+        calcular_lamina_irrigacao
+    )
+    from backend.llm_engine import (
+        processar_diagnostico_llm,
+        inicializar_llm_engine,
+        fechar_llm_engine,
+        executar_diagnostico_fallback
     )
 
 # Carrega variáveis de ambiente procurando em múltiplos caminhos do projeto
@@ -77,10 +98,32 @@ TEMPO_EXPIRACAO_FISICO_SEG = 30  # Se não receber dados em 30s, considera offli
 _ultimo_alerta_ts: Dict[str, float] = {}
 INTERVALO_MIN_ALERTA_SEG = 60.0
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        inicializar_banco()
+        print("[SQLite] Banco de dados e perfis Embrapa inicializados com sucesso.")
+    except Exception as exc:
+        print(f"[SQLite Init] Falha ao inicializar banco: {exc}")
+    try:
+        await inicializar_llm_engine()
+    except Exception as exc:
+        print(f"[LLM Engine] Inicialização do motor LLM: {exc}")
+    try:
+        yield
+    finally:
+        try:
+            await fechar_llm_engine()
+        except Exception as exc:
+            print(f"[LLM Engine] Encerramento do motor LLM: {exc}")
+
+
 app = FastAPI(
     title="Tekó Biotech API",
     description="Servidor de telemetria fitoeletrônica in-planta para agricultura familiar e resiliência climática.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Habilita CORS amplo para integração suave com WebApp (GitHub Pages, Netlify e Localhost)
@@ -162,6 +205,27 @@ class GatewayPacoteIn(BaseModel):
     temp_c: Optional[float] = Field(default=24.5, description="Temperatura do solo em °C")
     bateria_mv: Optional[int] = Field(default=3300, description="Tensão da bateria em mV")
     rssi_espnow: Optional[int] = Field(default=-65, description="Intensidade do rádio ESP-NOW em dBm")
+
+
+class DiagnosticoLLMIn(BaseModel):
+    tensao_kpa: float = Field(..., ge=0.0, le=250.0, description="Potencial matricial Ψm em kPa")
+    tipo_solo: Optional[str] = Field(default="franco", description="Tipo de solo (arenoso, franco ou argiloso)")
+    z_50k_ohms: Optional[float] = Field(default=1400.0, description="Bioimpedância simplástica a 50 kHz em Ohms")
+    z_1k_ohms: Optional[float] = Field(default=1200.0, description="Bioimpedância apoplástica a 1 kHz em Ohms")
+    orp_mv: Optional[float] = Field(default=310.0, description="Potencial Redox da rizosfera em mV")
+    cultura: Optional[str] = Field(default="Milho", description="Cultura vegetal analisada")
+    pergunta: Optional[str] = Field(default=None, description="Pergunta ou dúvida enviada pelo produtor rural")
+
+
+class DiagnosticoLLMOut(BaseModel):
+    status: str = Field(default="sucesso", description="Status do retorno ('sucesso')")
+    estado_planta: Literal["hidratada", "sede", "hipoxia"] = Field(..., description="Estado eletrofisiológico da planta")
+    bomba_status: Literal["BOMBA DESLIGADA", "LIGAR AMANHÃ ÀS 06H", "NÃO LIGAR A BOMBA!"] = Field(..., description="Comando acionador para o manejo da irrigação")
+    tempo_resposta_ms: float = Field(..., description="Tempo total de resposta da inferência em milissegundos")
+    motor_utilizado: Literal["ollama_local", "motor_especialista_fallback"] = Field(..., description="Identificação do motor que gerou o parecer")
+    diagnostico_texto: str = Field(..., description="Diagnóstico agronômico contextualizado")
+    recomendacao_manejo: str = Field(..., description="Recomendação prática de campo")
+    seguranca_termos_antigos: bool = Field(default=True, description="Conformidade estrita com a política anti-termos proibidos")
 
 
 # ============================================================================
@@ -640,7 +704,8 @@ def raiz():
             "/api/telemetria (POST)",
             "/api/telemetria/atual (GET)",
             "/api/telemetria/historico (GET)",
-            "/api/telemetria/simular (POST)"
+            "/api/telemetria/simular (POST)",
+            "/api/llm/diagnostico (POST)"
         ]
     }
 
@@ -894,15 +959,6 @@ def enviar_alerta_preditivo_telegram(texto_alerta: str, tipo_alerta: str = "pred
         print(f"[Telegram Push Preditivo] Falha ao enviar alerta Telegram: {exc}")
 
 
-@app.on_event("startup")
-def startup_event():
-    try:
-        inicializar_banco()
-        print("[SQLite] Banco de dados e perfis Embrapa inicializados com sucesso.")
-    except Exception as exc:
-        print(f"[SQLite Init] Falha ao inicializar banco: {exc}")
-
-
 @app.get("/api/perfis-cultura")
 def listar_perfis_cultura():
     """Retorna os perfis de cultura cadastrados com limites científicos da Embrapa."""
@@ -911,6 +967,39 @@ def listar_perfis_cultura():
         "total": len(perfis),
         "perfis": perfis
     }
+
+
+@app.get("/api/solos/van-genuchten")
+def listar_solos_van_genuchten():
+    """Retorna os parâmetros de retenção de água segundo Van Genuchten (11 solos)."""
+    solos = obter_solos_van_genuchten()
+    return {
+        "total": len(solos),
+        "solos": solos
+    }
+
+
+@app.get("/api/solos/van-genuchten/calcular")
+def calcular_retencao_solo(h_kpa: float = 25.0, classe: str = "Franco (Loam)"):
+    """Calcula a umidade volumétrica θ(h) para uma tensão e classe textural dada."""
+    return calcular_van_genuchten(h_kpa=h_kpa, classe=classe)
+
+
+@app.get("/api/culturas/fases")
+def listar_fases_cultura(cultura: Optional[str] = None):
+    """Retorna as fases fenológicas, raízes ativas (mm), Kc e limites hídricos diferenciados por solo."""
+    fases = obter_fases_cultura(cultura_id=cultura)
+    return {
+        "total": len(fases),
+        "cultura_filtro": cultura,
+        "fases": fases
+    }
+
+
+@app.get("/api/culturas/fases/calculo-lamina")
+def calcular_lamina_endpoint(et0: float = 4.0, kc: float = 1.0):
+    """Calcula a lâmina de irrigação recomendada ETc = ET0 * Kc em mm/dia e L/m²."""
+    return calcular_lamina_irrigacao(et0=et0, kc=kc)
 
 
 @app.get("/api/historico")
@@ -1180,7 +1269,7 @@ def listar_nos_ninhura():
         "total_nos_ativos": len(nos_lista),
         "nos": nos_lista,
         "tabela_fisica_solo_referencia": [
-            {"estado": "Saturação", "psi_m": "0 kPa", "ad_pct": "100%", "condicao": "Excesso de água e falta de oxigênio nas raízes."},
+            {"estado": "Saturado", "psi_m": "0 kPa", "ad_pct": "100%", "condicao": "Excesso de água e falta de oxigênio nas raízes."},
             {"estado": "Capacidade de Campo (CC)", "psi_m": "-10 a -33 kPa", "ad_pct": "100% (Limite superior)", "condicao": "Condição ideal de umidade e aeração."},
             {"estado": "Início do Estresse (Fator p)", "psi_m": "-30 a -70 kPa", "ad_pct": "40% a 60% restantes", "condicao": "Ponto crítico para reiniciar a irrigação sem perda produtiva."},
             {"estado": "Estresse Moderado a Severo", "psi_m": "-100 a -500 kPa", "ad_pct": "15% a 35% restantes", "condicao": "Fechamento estomático, redução da fotossíntese e murcha."},
@@ -1197,3 +1286,37 @@ def resetar_demonstracao():
         "sucesso": True,
         "resultado": res
     }
+
+
+@app.post(
+    "/api/llm/diagnostico",
+    response_model=DiagnosticoLLMOut,
+    tags=["Inteligência Artificial & Fitoeletrônica"],
+    summary="Gera parecer agronômico via LLM Local (Ollama) ou Motor Especialista de Fallback"
+)
+async def rota_diagnostico_llm(dados: DiagnosticoLLMIn):
+    """
+    Endpoint de alta resiliência para diagnóstico fitoeletrônico in-planta.
+    Consome dados de tensiometria (Van Genuchten), bioimpedância e ORP.
+    Tenta Ollama local (qwen2.5:0.5b); sob indisponibilidade ou timeout > 1.0s,
+    aciona instantaneamente o motor especialista determinístico (<50ms SLA).
+    Zero tolerância para termos legados proibidos. Nunca retorna erro 500.
+    """
+    t_inicio = time.perf_counter()
+    try:
+        resultado = await processar_diagnostico_llm(dados, t_inicio=t_inicio)
+        return DiagnosticoLLMOut(**resultado)
+    except Exception as exc:
+        print(f"[LLM Router] Falha não interceptada: {exc}. Acionando fallback determinístico de emergência.")
+        fallback = executar_diagnostico_fallback(
+            tensao_kpa=dados.tensao_kpa,
+            tipo_solo=dados.tipo_solo or "franco",
+            z_50k_ohms=dados.z_50k_ohms or 1400.0,
+            z_1k_ohms=dados.z_1k_ohms or 1200.0,
+            orp_mv=dados.orp_mv or 310.0,
+            cultura=dados.cultura or "Milho",
+            pergunta=dados.pergunta,
+            t_inicio=t_inicio
+        )
+        return DiagnosticoLLMOut(**fallback)
+

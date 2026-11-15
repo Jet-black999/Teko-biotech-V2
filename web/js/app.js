@@ -4,8 +4,9 @@
  * 4 Abas Especializadas: 1. Planta | 2. Triagem & Receita | 3. Gráficos & Hectares | 4. Engenharia & Gateway
  */
 
-import { initPlantCanvas } from './canvas_planta.js?v=18';
-import { initCharts, renderChartSecagem } from './charts.js?v=18';
+import { initPlantCanvas } from './canvas_planta.js?v=23';
+import { initPlant3D, isWebGLAvailable } from './simulador_3d.js?v=23';
+import { initCharts, renderChartSecagem } from './charts.js?v=23';
 import { 
   TELEMETRIA_ESTADOS, 
   FAQ_PRODUTOR, 
@@ -13,16 +14,22 @@ import {
   CONFIG_SOLOS, 
   MUNICIPIOS_RS,
   PERFIS_CULTURA,
+  VAN_GENUCHTEN_SOLOS,
+  MATRIZ_FASES_CULTURA,
   calcularAguaDisponivel, 
   classificarEstadoSolo,
-  calcularPredicaoSecagem
-} from './content.js?v=18';
-import { iniciarTelegram } from './telegram.js?v=18';
+  calcularPredicaoSecagem,
+  calcularLaminaIrrigacao
+} from './content.js?v=23';
+import { iniciarTelegram } from './telegram.js?v=23';
 
 let plantCanvasController = null;
+let plant3DController = null;
+let modoVisualizacao = '2d';
 let estadoAtual = 'hidratada';
 let tipoSoloAtual = localStorage.getItem('teko_tipo_solo') || localStorage.getItem('phytosense_tipo_solo') || 'franco';
 let perfilCulturaAtual = localStorage.getItem('teko_perfil_cultura') || localStorage.getItem('phytosense_perfil_cultura') || 'olericultura_alface_argissolo';
+let faseIndexAtual = 0;
 let tensaoAtualKpa = 21.5;
 let isSpeaking = false;
 let dadosClimaCache = null;
@@ -76,6 +83,10 @@ function initThemeManager() {
         btnClaro.classList.remove('ativo');
         btnClaro.setAttribute('aria-checked', 'false');
       }
+    }
+
+    if (plant3DController) {
+      plant3DController.setTheme(tema === 'light');
     }
 
     if (salvar) {
@@ -151,6 +162,16 @@ export function ativarAba(targetId) {
     }
   });
 
+  // Gerenciamento de ciclo de vida do simulador 3D ao alternar abas
+  if (targetId === 'aba-minha-planta') {
+    if (modoVisualizacao === '3d' && plant3DController) {
+      plant3DController.resume();
+      plant3DController.resize();
+    }
+  } else if (plant3DController) {
+    plant3DController.pause();
+  }
+
   // Se ativou gráficos ou planta, garante redimensionamento
   if (targetId === 'aba-graficos' || targetId === 'aba-minha-planta') {
     setTimeout(() => {
@@ -160,13 +181,130 @@ export function ativarAba(targetId) {
 }
 
 /**
- * 3. Inicialização do Canvas Interativo da Planta Sentinela
+ * 3. Inicialização dos Visualizadores da Planta Sentinela (2D Canvas e 3D Three.js WebGL)
  */
 function initCanvas() {
-  const canvasEl = document.getElementById('canvas-planta');
-  if (canvasEl) {
-    plantCanvasController = initPlantCanvas(canvasEl);
+  const canvas2DEl = document.getElementById('canvas-planta');
+  const canvas3DEl = document.getElementById('canvas-planta-3d');
+  const btnView2D = document.getElementById('btn-view-2d');
+  const btnView3D = document.getElementById('btn-view-3d');
+  const btnResetCam = document.getElementById('btn-reset-cam-3d');
+  const hint3D = document.getElementById('canvas-3d-hint');
+  const liveRegion = document.getElementById('sr-anuncios');
+
+  if (canvas2DEl) {
+    plantCanvasController = initPlantCanvas(canvas2DEl);
   }
+
+  const webglDisponivel = isWebGLAvailable();
+
+  function anunciar(msg) {
+    if (liveRegion) {
+      liveRegion.textContent = msg;
+    }
+  }
+
+  function alternarPara2D(motivo = '') {
+    modoVisualizacao = '2d';
+    if (canvas2DEl) canvas2DEl.hidden = false;
+    if (canvas3DEl) canvas3DEl.hidden = true;
+    if (hint3D) hint3D.hidden = true;
+    if (btnResetCam) btnResetCam.hidden = true;
+
+    if (btnView2D) {
+      btnView2D.classList.add('ativo');
+      btnView2D.setAttribute('aria-pressed', 'true');
+    }
+    if (btnView3D) {
+      btnView3D.classList.remove('ativo');
+      btnView3D.setAttribute('aria-pressed', 'false');
+    }
+
+    if (plant3DController) {
+      plant3DController.pause();
+    }
+
+    anunciar(motivo || 'Visualização 2D esquemática fitoeletrônica ativada.');
+  }
+
+  function alternarPara3D() {
+    if (!webglDisponivel) {
+      anunciar('Aceleração 3D WebGL indisponível neste dispositivo. Mantendo visualização 2D fitoeletrônica.');
+      return;
+    }
+
+    modoVisualizacao = '3d';
+    if (canvas2DEl) canvas2DEl.hidden = true;
+    if (canvas3DEl) canvas3DEl.hidden = false;
+    if (hint3D) hint3D.hidden = false;
+    if (btnResetCam) btnResetCam.hidden = false;
+
+    if (btnView3D) {
+      btnView3D.classList.add('ativo');
+      btnView3D.setAttribute('aria-pressed', 'true');
+    }
+    if (btnView2D) {
+      btnView2D.classList.remove('ativo');
+      btnView2D.setAttribute('aria-pressed', 'false');
+    }
+
+    if (!plant3DController && canvas3DEl) {
+      plant3DController = initPlant3D(canvas3DEl);
+      const isLight = document.documentElement.dataset.theme === 'light';
+      if (plant3DController) {
+        plant3DController.setTheme(isLight);
+        plant3DController.setState(estadoAtual);
+      }
+    } else if (plant3DController) {
+      plant3DController.resume();
+      plant3DController.resize();
+    }
+
+    anunciar('Visualização 3D interativa Three.js ativada. Use toque, mouse ou setas do teclado para rotacionar o modelo fitoelétrico.');
+  }
+
+  if (btnView2D) {
+    btnView2D.addEventListener('click', () => alternarPara2D());
+  }
+
+  if (btnView3D) {
+    if (!webglDisponivel) {
+      btnView3D.setAttribute('aria-disabled', 'true');
+      btnView3D.title = 'Aceleração 3D WebGL indisponível neste navegador';
+      btnView3D.style.opacity = '0.5';
+      btnView3D.style.cursor = 'not-allowed';
+    }
+    btnView3D.addEventListener('click', () => alternarPara3D());
+  }
+
+  if (btnResetCam) {
+    btnResetCam.addEventListener('click', () => {
+      if (plant3DController) {
+        plant3DController.resetCamera();
+        anunciar('Câmera do modelo 3D redefinida para a posição frontal padrão.');
+      }
+    });
+  }
+
+  // Fallback automático se o contexto WebGL for perdido em tempo de execução
+  window.addEventListener('teko-webgl-lost', () => {
+    alternarPara2D('Contexto gráfico WebGL interrompido. Alternando automaticamente para visualização 2D.');
+  });
+
+  // Otimização de bateria e performance em segundo plano (document.hidden)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (plant3DController) {
+        plant3DController.pause();
+      }
+    } else {
+      const abaPlantaAtiva = !document.getElementById('aba-minha-planta')?.hidden;
+      if (abaPlantaAtiva && modoVisualizacao === '3d' && plant3DController) {
+        plant3DController.resume();
+        plant3DController.resize();
+      }
+    }
+  });
 }
 
 /**
@@ -188,6 +326,7 @@ function initSeletorSolo() {
       atualizarBotoesSoloUi(solo);
       
       atualizarAguaDisponivel(tensaoAtualKpa);
+      atualizarDadosFaseUi();
       atualizarReceitaPrescritiva();
 
       if (window.recalcularSimuladorHectares) {
@@ -222,6 +361,33 @@ export function atualizarAguaDisponivel(tensaoKpa) {
   const explicacaoEl = document.getElementById('ad-explicacao-solo');
   const trilhoEl = document.querySelector('.ad-trilho');
 
+  const valEstadoHidrico = document.getElementById('val-estado-hidrico');
+  const valAdPct = document.getElementById('val-ad-pct');
+  const valTensao = document.getElementById('val-tensao-kpa');
+
+  if (valTensao) {
+    valTensao.textContent = `${tensaoAtualKpa.toFixed(1)} kPa`;
+  }
+  if (valAdPct) {
+    valAdPct.textContent = `${ad.porcentagem}%`;
+    valAdPct.style.color = ad.cor;
+  }
+  if (valEstadoHidrico) {
+    if (tensaoAtualKpa <= 5.0) {
+      valEstadoHidrico.textContent = 'Saturado';
+      valEstadoHidrico.style.color = '#38bdf8';
+    } else if (ad.porcentagem >= 60) {
+      valEstadoHidrico.textContent = 'Capacidade de Campo';
+      valEstadoHidrico.style.color = '#10b981';
+    } else if (ad.porcentagem >= 40) {
+      valEstadoHidrico.textContent = 'Início de Estresse';
+      valEstadoHidrico.style.color = '#f59e0b';
+    } else {
+      valEstadoHidrico.textContent = 'Estresse Hídrico';
+      valEstadoHidrico.style.color = '#ef4444';
+    }
+  }
+
   if (valorTextoEl) {
     valorTextoEl.textContent = `${ad.porcentagem}% (${ad.condicao})`;
     valorTextoEl.style.color = ad.cor;
@@ -251,12 +417,106 @@ async function notificarBackendTipoSolo(solo) {
 }
 
 /**
+ * Funções Auxiliares da Matriz Fenológica (Embrapa & FAO-56)
+ */
+function extrairChaveCultura(perfilId) {
+  if (!perfilId) return 'alface';
+  if (perfilId.includes('milho')) return 'milho';
+  if (perfilId.includes('tomate')) return 'tomate';
+  if (perfilId.includes('feijao')) return 'feijao';
+  return 'alface';
+}
+
+function normalizarChaveSoloParaLimiar(soloSistema) {
+  if (!soloSistema) return 'franco';
+  if (soloSistema === 'arenoso') return 'arenoso';
+  if (soloSistema === 'franco_arenoso') return 'franco_arenoso';
+  if (soloSistema === 'franco_argiloso') return 'franco_argiloso';
+  if (soloSistema === 'argiloso') return 'argiloso';
+  return 'franco';
+}
+
+function obterFaseAtiva() {
+  const chave = extrairChaveCultura(perfilCulturaAtual);
+  const cultura = MATRIZ_FASES_CULTURA[chave];
+  if (!cultura?.fases?.length) return null;
+  const idx = Math.min(Math.max(0, faseIndexAtual), cultura.fases.length - 1);
+  return { ...cultura.fases[idx], culturaNome: cultura.nome, icone: cultura.icone, chave };
+}
+
+function obterLimiteKpaFase(fase, soloKey = tipoSoloAtual) {
+  if (!fase?.limiaresKpa) {
+    return PERFIS_CULTURA[perfilCulturaAtual]?.manejoKpa || 30;
+  }
+  const soloNorm = normalizarChaveSoloParaLimiar(soloKey);
+  return fase.limiaresKpa[soloNorm] || fase.limiaresKpa.franco || 30;
+}
+
+function atualizarSeletorFaseCulturaUi() {
+  const selectFase = document.getElementById('select-fase-cultura');
+  const chave = extrairChaveCultura(perfilCulturaAtual);
+  const dadosCultura = MATRIZ_FASES_CULTURA[chave];
+  if (!selectFase || !dadosCultura) return;
+
+  const salvoKey = `teko_fase_${chave}`;
+  const salvoVal = Number.parseInt(localStorage.getItem(salvoKey), 10);
+  faseIndexAtual = !Number.isNaN(salvoVal) && salvoVal >= 0 && salvoVal < dadosCultura.fases.length ? salvoVal : 0;
+
+  selectFase.innerHTML = '';
+  dadosCultura.fases.forEach((f, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = `${f.fase} · Kc: ${f.kc.toFixed(2)}`;
+    if (idx === faseIndexAtual) opt.selected = true;
+    selectFase.appendChild(opt);
+  });
+
+  atualizarDadosFaseUi();
+}
+
+function atualizarDadosFaseUi() {
+  const fase = obterFaseAtiva();
+  if (!fase) return;
+
+  const elRaiz = document.getElementById('fase-raiz-val');
+  const elKc = document.getElementById('fase-kc-val');
+  const elLimite = document.getElementById('fase-limite-val');
+  const elLamina = document.getElementById('fase-lamina-val');
+
+  const limiteKpa = obterLimiteKpaFase(fase, tipoSoloAtual);
+  const et0 = dadosClimaCache?.temperatura_atual ? Math.max(3.0, Math.min(6.5, (dadosClimaCache.temperatura_atual / 6))) : 4.0;
+  const lamina = calcularLaminaIrrigacao(et0, fase.kc);
+  const laminaVal = (lamina && (lamina.laminaMmDia || lamina.etcMmDia)) ? (lamina.laminaMmDia || lamina.etcMmDia) : (et0 * fase.kc).toFixed(1);
+
+  if (elRaiz) elRaiz.textContent = `${fase.raizMm} mm (${(fase.raizMm / 10).toFixed(0)} cm)`;
+  if (elKc) elKc.textContent = `${fase.kc.toFixed(2)}`;
+  if (elLimite) elLimite.textContent = `${limiteKpa} kPa`;
+  if (elLamina) elLamina.textContent = `${laminaVal} mm/dia`;
+
+  // Atualiza limite do gráfico e aviso da Embrapa
+  renderChartSecagem(perfilCulturaAtual, null, limiteKpa);
+  atualizarPredicaoUi(tensaoAtualKpa, limiteKpa);
+}
+
+/**
  * 5. Seletor de Cultura e Motor Preditivo Embrapa (4 Culturas)
  */
 function initSeletorCultura() {
   const botoesCultura = document.querySelectorAll('.btn-cultura');
   atualizarBotoesCulturaUi(perfilCulturaAtual);
+  atualizarSeletorFaseCulturaUi();
   atualizarPredicaoUi(tensaoAtualKpa);
+
+  const selectFase = document.getElementById('select-fase-cultura');
+  if (selectFase) {
+    selectFase.addEventListener('change', () => {
+      faseIndexAtual = Number.parseInt(selectFase.value, 10) || 0;
+      const chave = extrairChaveCultura(perfilCulturaAtual);
+      localStorage.setItem(`teko_fase_${chave}`, faseIndexAtual);
+      atualizarDadosFaseUi();
+      atualizarReceitaPrescritiva();
+    });
+  }
 
   botoesCultura.forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -266,13 +526,14 @@ function initSeletorCultura() {
       perfilCulturaAtual = cultura;
       localStorage.setItem('teko_perfil_cultura', cultura);
       atualizarBotoesCulturaUi(cultura);
+      atualizarSeletorFaseCulturaUi();
       atualizarPredicaoUi(tensaoAtualKpa);
       atualizarReceitaPrescritiva();
       renderChartSecagem(cultura);
 
       const liveRegion = document.getElementById('sr-anuncios');
       if (liveRegion) {
-        liveRegion.textContent = `Cultura alterada para ${PERFIS_CULTURA[cultura].cultura}. Limite de manejo Embrapa calibrado para ${PERFIS_CULTURA[cultura].manejoKpa} kPa.`;
+        liveRegion.textContent = `Cultura alterada para ${PERFIS_CULTURA[cultura].cultura}. Limite de manejo Embrapa calibrado.`;
       }
     });
   });
@@ -312,7 +573,7 @@ function initSeletorCultura() {
 
       tensaoAtualKpa = novaTensao;
       atualizarAguaDisponivel(tensaoAtualKpa);
-      atualizarPredicaoUi(tensaoAtualKpa);
+      atualizarDadosFaseUi();
       atualizarReceitaPrescritiva();
       renderChartSecagem(perfilCulturaAtual, [14.0, 16.5, 19.0, 21.5, 25.5, tensaoAtualKpa]);
 
@@ -335,7 +596,7 @@ function initSeletorCultura() {
     btnReset.addEventListener('click', async () => {
       tensaoAtualKpa = perfilCulturaAtual.includes('alface') ? 21.5 : 25.0;
       atualizarAguaDisponivel(tensaoAtualKpa);
-      atualizarPredicaoUi(tensaoAtualKpa);
+      atualizarDadosFaseUi();
       atualizarReceitaPrescritiva();
       renderChartSecagem(perfilCulturaAtual);
 
@@ -368,10 +629,38 @@ function atualizarBotoesCulturaUi(culturaAtiva) {
   });
 }
 
-export function atualizarPredicaoUi(tensaoOverride = null) {
-  const t = tensaoOverride !== null ? parseFloat(tensaoOverride) : (parseFloat(tensaoAtualKpa) || 21.5);
+function resolverLimiteFinalKpa(limiteOverride, fase) {
+  if (limiteOverride !== null && !Number.isNaN(limiteOverride)) {
+    return Number.parseFloat(limiteOverride);
+  }
+  if (fase) {
+    return obterLimiteKpaFase(fase, tipoSoloAtual);
+  }
+  return PERFIS_CULTURA[perfilCulturaAtual]?.manejoKpa || 28;
+}
+
+function formatarStatusDiasRestantes(diasRestantes) {
+  if (diasRestantes <= 0) {
+    return { texto: '0 dias (CRÍTICO)', cor: '#ef4444' };
+  }
+  if (diasRestantes <= 1.0) {
+    return { texto: `${diasRestantes} dia (< 24h)`, cor: '#ef4444' };
+  }
+  if (diasRestantes <= 3.0) {
+    return { texto: `${diasRestantes} dias (Atenção)`, cor: '#f59e0b' };
+  }
+  return { texto: `${diasRestantes} dias (Seguro)`, cor: '#10b981' };
+}
+
+export function atualizarPredicaoUi(tensaoOverride = null, limiteOverride = null) {
+  const t = tensaoOverride !== null 
+    ? Number.parseFloat(tensaoOverride) 
+    : (Number.parseFloat(tensaoAtualKpa) || 21.5);
   const taxaPadrao = PERFIS_CULTURA[perfilCulturaAtual]?.taxaSecagemPadrao || 2.0;
-  const pred = calcularPredicaoSecagem(t, perfilCulturaAtual, taxaPadrao);
+  const fase = obterFaseAtiva();
+  const limiteFinal = resolverLimiteFinalKpa(limiteOverride, fase);
+
+  const pred = calcularPredicaoSecagem(t, perfilCulturaAtual, taxaPadrao, limiteFinal);
 
   const taxaEl = document.getElementById('pred-taxa-val');
   const diasEl = document.getElementById('pred-dias-val');
@@ -379,23 +668,19 @@ export function atualizarPredicaoUi(tensaoOverride = null) {
 
   if (taxaEl) taxaEl.textContent = `${pred.taxaSecagemKpaDia.toFixed(1)} kPa/dia`;
   if (diasEl) {
-    if (pred.diasRestantes <= 0) {
-      diasEl.textContent = '0 dias (CRÍTICO)';
-      diasEl.style.color = '#ef4444';
-    } else if (pred.diasRestantes <= 1.0) {
-      diasEl.textContent = `${pred.diasRestantes} dia (< 24h)`;
-      diasEl.style.color = '#ef4444';
-    } else if (pred.diasRestantes <= 3.0) {
-      diasEl.textContent = `${pred.diasRestantes} dias (Atenção)`;
-      diasEl.style.color = '#f59e0b';
-    } else {
-      diasEl.textContent = `${pred.diasRestantes} dias (Seguro)`;
-      diasEl.style.color = '#10b981';
-    }
+    const statusDias = formatarStatusDiasRestantes(pred.diasRestantes);
+    diasEl.textContent = statusDias.texto;
+    diasEl.style.color = statusDias.cor;
   }
   if (msgEl) {
     msgEl.textContent = pred.mensagem;
     msgEl.style.borderLeftColor = pred.cor;
+  }
+
+  const valLimite = document.getElementById('val-limite-embrapa');
+  const perfil = PERFIS_CULTURA[perfilCulturaAtual] || PERFIS_CULTURA.olericultura_alface_argissolo;
+  if (valLimite) {
+    valLimite.textContent = `${limiteFinal} kPa (${perfil.cultura}${fase ? ' · ' + fase.fase : ''})`;
   }
 }
 
@@ -675,6 +960,8 @@ function atualizarReceitaPrescritiva() {
 
   const perfil = PERFIS_CULTURA[perfilCulturaAtual] || PERFIS_CULTURA.olericultura_alface_argissolo;
   const soloCfg = CONFIG_SOLOS[tipoSoloAtual] || CONFIG_SOLOS.franco;
+  const fase = obterFaseAtiva();
+  const limiteManejo = fase ? obterLimiteKpaFase(fase, tipoSoloAtual) : perfil.manejoKpa;
   const chuvaPrevista = dadosClimaCache?.chuva_prevista_24h_mm || 0;
   const probChuva = dadosClimaCache?.probabilidade_chuva_max_pct || 0;
   const alertaChuva = dadosClimaCache?.alerta_suspensao_irrigacao || false;
@@ -722,7 +1009,7 @@ function atualizarReceitaPrescritiva() {
       avisoClima.textContent = `🌧️ Manejo Preditivo Inteligente: Economize ~R$ 38,00 em diesel/luz aguardando a recarga pluvial.`;
     }
     if (btnLaudo) btnLaudo.style.display = 'none';
-  } else if (tensaoAtualKpa >= perfil.manejoKpa || estadoAtual === 'sede') {
+  } else if (tensaoAtualKpa >= limiteManejo || estadoAtual === 'sede') {
     const tempoMinutos = tipoSoloAtual === 'arenoso' ? 35 : (tipoSoloAtual === 'franco' ? 45 : 60);
     if (statusTag) {
       statusTag.textContent = 'Necessita Irrigação';
@@ -736,7 +1023,7 @@ function atualizarReceitaPrescritiva() {
       tempoBomba.textContent = `Turno cirúrgico matinal (${tempoMinutos} min): poupa 2.400 L de água e R$ 22,00 de diesel vs irrigação contínua`;
     }
     if (explicacao) {
-      explicacao.textContent = `Tensão matricial (${tensaoAtualKpa} kPa) atingiu o limite crítico Embrapa para ${perfil.cultura} (${perfil.manejoKpa} kPa). Iniciar gotejamento para devolver o solo à Capacidade de Campo (${perfil.ccKpa} kPa).`;
+      explicacao.textContent = `Tensão matricial (${tensaoAtualKpa} kPa) atingiu o limite crítico Embrapa para ${perfil.cultura}${fase ? ' na fase ' + fase.fase : ''} (${limiteManejo} kPa). Iniciar gotejamento para devolver o solo à Capacidade de Campo (${perfil.ccKpa} kPa).`;
     }
     if (avisoClima) {
       avisoClima.style.borderLeftColor = alertaVento ? '#ef4444' : '#f59e0b';
@@ -792,17 +1079,17 @@ export function aplicarEstado(estadoKey) {
 
   estadoAtual = estadoKey;
 
-  const cfg = CONFIG_SOLOS[tipoSoloAtual] || CONFIG_SOLOS.franco;
   if (estadoKey === 'hipoxia') {
-    tensaoAtualKpa = 3.5;
+    tensaoAtualKpa = 2.0; // Solo Saturado
   } else if (estadoKey === 'sede') {
-    tensaoAtualKpa = cfg.estresseKpa + 5.0;
+    tensaoAtualKpa = 48.0; // Estresse Hídrico Crítico
   } else {
-    tensaoAtualKpa = cfg.ccKpa;
+    tensaoAtualKpa = 21.5; // Capacidade de Campo (Ideal)
   }
   atualizarAguaDisponivel(tensaoAtualKpa);
   atualizarPredicaoUi(tensaoAtualKpa);
   atualizarReceitaPrescritiva();
+  renderChartSecagem(perfilCulturaAtual, [14.0, 16.5, 19.0, 21.5, 25.5, tensaoAtualKpa]);
 
   document.querySelectorAll('.btn-estado').forEach((btn) => {
     const ativo = btn.getAttribute('data-estado') === estadoKey;
@@ -812,6 +1099,9 @@ export function aplicarEstado(estadoKey) {
 
   if (plantCanvasController) {
     plantCanvasController.setState(estadoKey);
+  }
+  if (plant3DController) {
+    plant3DController.setState(estadoKey);
   }
 
   const badgeEl = document.getElementById('diag-badge');
@@ -976,23 +1266,172 @@ function enviarPerguntaSimulada(pergunta, resposta) {
 }
 
 /**
- * 11. Ficha Técnica da Engenharia (Pilares)
+ * 11. Ficha Técnica da Engenharia (Pilares) e Parâmetros Embrapa
  */
 function initEngenharia() {
   const containerPilares = document.getElementById('container-pilares-engenharia');
-  if (!containerPilares) return;
+  if (containerPilares) {
+    containerPilares.innerHTML = '';
+    PILARES_ENGENHARIA.forEach((pilar) => {
+      const card = document.createElement('article');
+      card.className = 'card-pilar';
+      card.innerHTML = `
+        <h3>${escapeHtml(pilar.titulo)}</h3>
+        <p class="pilar-sub">${escapeHtml(pilar.subtitulo)}</p>
+        <p class="pilar-desc">${escapeHtml(pilar.descricao)}</p>
+      `;
+      containerPilares.appendChild(card);
+    });
+  }
 
-  containerPilares.innerHTML = '';
-  PILARES_ENGENHARIA.forEach((pilar) => {
-    const card = document.createElement('article');
-    card.className = 'card-pilar';
-    card.innerHTML = `
-      <h3>${escapeHtml(pilar.titulo)}</h3>
-      <p class="pilar-sub">${escapeHtml(pilar.subtitulo)}</p>
-      <p class="pilar-desc">${escapeHtml(pilar.descricao)}</p>
-    `;
-    containerPilares.appendChild(card);
+  // 11.1 Renderizar Tabela de Fases Fenológicas (Milho por padrão)
+  renderizarTabelaFasesFenologicas('milho');
+
+  // 11.2 Renderizar Tabela de Van Genuchten (11 Solos)
+  renderizarTabelaVanGenuchten();
+
+  // 11.3 Alternância de Cultura nas Abas da Tabela de Fases
+  const btnsFaseTab = document.querySelectorAll('.btn-tab-fase');
+  btnsFaseTab.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btnsFaseTab.forEach((b) => {
+        b.classList.remove('ativo');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('ativo');
+      btn.setAttribute('aria-selected', 'true');
+      const culturaTab = btn.dataset.culturaTab || 'milho';
+      renderizarTabelaFasesFenologicas(culturaTab);
+    });
   });
+}
+
+function renderizarTabelaFasesFenologicas(culturaKey = 'milho') {
+  const container = document.getElementById('container-tabela-fases');
+  if (!container) return;
+
+  const dados = MATRIZ_FASES_CULTURA[culturaKey];
+  if (!dados?.fases) return;
+
+  let html = `
+    <table class="tabela-estado-hidrico" style="width: 100%; border-collapse: collapse;">
+      <caption class="sr-only">Fases fenológicas e limites hídricos para ${escapeHtml(dados.nome)}</caption>
+      <thead>
+        <tr>
+          <th scope="col" style="text-align: left;">Fase Fenológica</th>
+          <th scope="col" style="text-align: center;">Raiz (Zr)</th>
+          <th scope="col" style="text-align: center;">Kc (FAO-56)</th>
+          <th scope="col" style="text-align: center;">Arenoso</th>
+          <th scope="col" style="text-align: center;">Franco-Aren.</th>
+          <th scope="col" style="text-align: center;">Franco</th>
+          <th scope="col" style="text-align: center;">Argiloso</th>
+          <th scope="col" style="text-align: center;">Lâmina (ETc)</th>
+          <th scope="col" style="text-align: left;">Fonte Oficial</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  dados.fases.forEach((f) => {
+    const lamina = calcularLaminaIrrigacao(4.0, f.kc);
+    const laminaVal = (lamina && (lamina.laminaMmDia || lamina.etcMmDia)) ? (lamina.laminaMmDia || lamina.etcMmDia) : (4.0 * f.kc).toFixed(1);
+    html += `
+      <tr>
+        <td style="font-weight: 600;">${escapeHtml(f.fase)}</td>
+        <td style="text-align: center; font-family: monospace;">${f.raizMm} mm</td>
+        <td style="text-align: center; font-weight: 700; color: #10b981;">${f.kc.toFixed(2)}</td>
+        <td style="text-align: center; font-family: monospace;">${f.limiaresKpa.arenoso} kPa</td>
+        <td style="text-align: center; font-family: monospace;">${f.limiaresKpa.franco_arenoso} kPa</td>
+        <td style="text-align: center; font-family: monospace;">${f.limiaresKpa.franco} kPa</td>
+        <td style="text-align: center; font-family: monospace;">${f.limiaresKpa.argiloso} kPa</td>
+        <td style="text-align: center; font-family: monospace;">${laminaVal} mm/dia</td>
+        <td style="font-size: 0.75rem; color: var(--texto-secundario);">${escapeHtml(f.fonte)}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </tbody>
+    </table>
+  `;
+
+  container.innerHTML = html;
+}
+
+function renderizarTabelaVanGenuchten() {
+  const container = document.getElementById('container-tabela-van-genuchten');
+  if (!container) return;
+
+  let html = `
+    <table class="tabela-estado-hidrico" style="width: 100%; border-collapse: collapse;">
+      <caption class="sr-only">Parâmetros analíticos de retenção de água segundo Van Genuchten (11 classes texturais)</caption>
+      <thead>
+        <tr>
+          <th scope="col" style="text-align: left;">Classe Textural (USDA / Embrapa)</th>
+          <th scope="col" style="text-align: center;">θr (m³/m³)</th>
+          <th scope="col" style="text-align: center;">θs (m³/m³)</th>
+          <th scope="col" style="text-align: center;">α (kPa⁻¹)</th>
+          <th scope="col" style="text-align: center;">n</th>
+          <th scope="col" style="text-align: center;">m (1 - 1/n)</th>
+          <th scope="col" style="text-align: center;">Cap. Campo (CC)</th>
+          <th scope="col" style="text-align: center;">Ponto Murcha (PMP)</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  VAN_GENUCHTEN_SOLOS.forEach((s) => {
+    let tr = 0.05;
+    if (typeof s.thetaR === 'number') {
+      tr = s.thetaR;
+    } else if (typeof s.theta_r === 'number') {
+      tr = s.theta_r;
+    }
+
+    let ts = 0.40;
+    if (typeof s.thetaS === 'number') {
+      ts = s.thetaS;
+    } else if (typeof s.theta_s === 'number') {
+      ts = s.theta_s;
+    }
+
+    const al = typeof s.alpha === 'number' ? s.alpha : 0.1;
+    const n = typeof s.n === 'number' ? s.n : 1.5;
+    const m = typeof s.m === 'number' ? s.m : (1.0 - (1.0 / n));
+
+    let cc = s.ccKpa;
+    if (!cc) {
+      if (s.categoria === 'arenoso') {
+        cc = 10;
+      } else if (s.categoria === 'argiloso') {
+        cc = 33;
+      } else {
+        cc = 22;
+      }
+    }
+
+    const pmp = s.pmpKpa || 1500;
+
+    html += `
+      <tr>
+        <td style="font-weight: 600;">${escapeHtml(s.classe)}</td>
+        <td style="text-align: center; font-family: monospace;">${tr.toFixed(3)}</td>
+        <td style="text-align: center; font-family: monospace;">${ts.toFixed(3)}</td>
+        <td style="text-align: center; font-family: monospace;">${al.toFixed(2)}</td>
+        <td style="text-align: center; font-family: monospace;">${n.toFixed(2)}</td>
+        <td style="text-align: center; font-family: monospace;">${m.toFixed(3)}</td>
+        <td style="text-align: center; font-family: monospace;">${cc} kPa</td>
+        <td style="text-align: center; font-family: monospace;">${pmp} kPa</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </tbody>
+    </table>
+  `;
+
+  container.innerHTML = html;
 }
 
 /**

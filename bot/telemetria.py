@@ -69,6 +69,14 @@ SOLOS_INFO = {
         "estresse_kpa": 30.0,
         "descricao": "Drena rápido por gravidade. Estresse hídrico inicia cedo (30 kPa). Irrigação mais frequente."
     },
+    "franco_arenoso": {
+        "id": "franco_arenoso",
+        "nome": "Solo Franco-Arenoso (Médio-Leve)",
+        "icone": "🌾",
+        "cc_kpa": 15.0,
+        "estresse_kpa": 40.0,
+        "descricao": "Textura média leve com boa drenagem e aeração equilibrada."
+    },
     "franco": {
         "id": "franco",
         "nome": "Solo Franco / Médio",
@@ -160,3 +168,86 @@ def obter_telemetria_tempo_real(backend_url: Optional[str] = None, tipo_solo: Op
         "acao_recomendada": "Manter bomba desligada hoje. Seiva normal.",
         "segundos_desde_leitura": 0.0
     }
+
+
+def obter_diagnostico_llm(
+    telemetria: Dict[str, Any],
+    pergunta: Optional[str] = None,
+    backend_url: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Obtém diagnóstico fitoeletrônico inteligente para a mensagem de voz.
+    Tenta conexão com o backend FastAPI (/api/llm/diagnostico).
+    Caso o backend esteja inacessível ou em modo offline, invoca o motor
+    especialista de fallback local (executar_diagnostico_fallback) em < 5ms.
+    """
+    url_base = (backend_url or BACKEND_API_URL).rstrip("/")
+    endpoint = f"{url_base}/api/llm/diagnostico"
+
+    # Clamping preventivo para tensao_kpa entre 0.0 e 250.0 (regra Pydantic)
+    raw_tensao = telemetria.get("tensao_kpa", 21.5)
+    try:
+        tensao_kpa = max(0.0, min(250.0, float(raw_tensao)))
+    except (TypeError, ValueError):
+        tensao_kpa = 21.5
+
+    payload = {
+        "tensao_kpa": tensao_kpa,
+        "tipo_solo": telemetria.get("tipo_solo", "franco"),
+        "z_50k_ohms": float(telemetria.get("z_50k_ohms", 1400.0)),
+        "z_1k_ohms": float(telemetria.get("z_1k_ohms", 1200.0)),
+        "orp_mv": float(telemetria.get("orp_mv", 310.0)),
+        "cultura": telemetria.get("cultura", "Milho"),
+        "pergunta": pergunta or "Solicitação de diagnóstico da lavoura via áudio"
+    }
+
+    try:
+        resp = requests.post(endpoint, json=payload, timeout=1.5)
+        if resp.status_code == 200:
+            dados = resp.json()
+            diagnostico_texto = dados.get("diagnostico_texto", "")
+            recomendacao = dados.get("recomendacao_manejo", "")
+            resposta_formatada = f"{diagnostico_texto}\n\n💡 <b>Recomendação de Manejo:</b>\n{recomendacao}"
+            return {
+                "sucesso": True,
+                "resposta": resposta_formatada,
+                "dados": dados,
+                "origem": dados.get("motor_utilizado", "backend_api")
+            }
+    except Exception:
+        pass
+
+    # Fallback fitoeletrônico instantâneo em memória (<5ms)
+    try:
+        from llm_engine import executar_diagnostico_fallback
+    except ImportError:
+        try:
+            from backend.llm_engine import executar_diagnostico_fallback
+        except ImportError:
+            import sys
+            _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            if _root not in sys.path:
+                sys.path.insert(0, _root)
+            from backend.llm_engine import executar_diagnostico_fallback
+
+    fb = executar_diagnostico_fallback(
+        tensao_kpa=payload["tensao_kpa"],
+        tipo_solo=payload["tipo_solo"],
+        z_50k_ohms=payload["z_50k_ohms"],
+        z_1k_ohms=payload["z_1k_ohms"],
+        orp_mv=payload["orp_mv"],
+        cultura=payload["cultura"],
+        pergunta=payload["pergunta"]
+    )
+
+    diagnostico_texto = fb.get("diagnostico_texto", "")
+    recomendacao = fb.get("recomendacao_manejo", "")
+    resposta_formatada = f"{diagnostico_texto}\n\n💡 <b>Recomendação de Manejo:</b>\n{recomendacao}"
+
+    return {
+        "sucesso": True,
+        "resposta": resposta_formatada,
+        "dados": fb,
+        "origem": "fallback_local"
+    }
+
