@@ -335,7 +335,77 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
   transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
-#canvas-planta {
+.visualizador-header {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.badge-visualizador {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--verde-fito);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.visualizador-controles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.btn-toggle-view {
+  min-height: 48px;
+  min-width: 48px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid var(--borda-suave);
+  background: var(--bg-hover);
+  color: var(--texto-secundario);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-toggle-view:hover {
+  background: var(--bg-card);
+  color: var(--texto-branco);
+  border-color: var(--verde-fito);
+}
+
+.btn-toggle-view.ativo {
+  background: var(--verde-escuro);
+  color: #ffffff;
+  border-color: var(--verde-fito);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.btn-toggle-view:focus-visible {
+  outline: 2px solid var(--verde-fito);
+  outline-offset: 2px;
+}
+
+.btn-reset-cam {
+  padding: 8px 12px;
+  font-size: 0.95rem;
+}
+
+#canvas-planta,
+#canvas-planta-3d {
   width: 100%;
   max-width: 520px;
   height: 340px;
@@ -344,10 +414,23 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
   background: var(--canvas-bg);
   border: 1px solid var(--borda-suave);
   transition: background-color 0.25s ease, border-color 0.25s ease;
+  touch-action: none;
+}
+
+#canvas-planta-3d:focus-visible {
+  outline: 2px solid var(--verde-fito);
+  outline-offset: 2px;
 }
 
 .canvas-legenda {
   margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--texto-secundario);
+  text-align: center;
+}
+
+.canvas-3d-hint {
+  margin-top: 4px;
   font-size: 0.75rem;
   color: var(--texto-secundario);
   text-align: center;
@@ -2689,5 +2772,33 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
   border-color: #fde68a;
   color: #78350f;
 }
+
+[data-theme="light"] .badge-visualizador {
+  color: #15803d;
+}
+
+[data-theme="light"] .btn-toggle-view {
+  background: #FAF6EE;
+  border-color: #d8cfc0;
+  color: #374151;
+}
+
+[data-theme="light"] .btn-toggle-view:hover {
+  background: #ffffff;
+  color: #111827;
+  border-color: #15803d;
+}
+
+[data-theme="light"] .btn-toggle-view.ativo {
+  background: #15803d;
+  color: #ffffff;
+  border-color: #166534;
+  box-shadow: 0 2px 8px rgba(21, 128, 61, 0.25);
+}
+
+[data-theme="light"] .canvas-3d-hint {
+  color: #4b5563;
+}
+
 
 
