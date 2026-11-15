@@ -16,6 +16,7 @@ import asyncio
 import os
 import sys
 import time
+import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -272,6 +273,27 @@ def test_sanitizacao_termos_proibidos_saco_biodegradavel():
         assert verificar_seguranca_termos(san) is True
 
 
+def test_sanitizacao_unicode_nfd():
+    """Valida neutralização de caracteres combinantes NFD para prevenir evasão por diacríticos."""
+    termo_nfd = unicodedata.normalize("NFD", "saco biodegradável")
+    sanitizado = sanitizar_texto(termo_nfd)
+    assert "saco biodegradavel" not in sanitizado.lower()
+    assert "saco biodegradável" not in sanitizado.lower()
+    assert verificar_seguranca_termos(sanitizado) is True
+
+    # Outros casos NFD e acentuações compostas
+    casca_nfd = unicodedata.normalize("NFD", "cascas de arroz")
+    san_casca = sanitizar_texto(casca_nfd)
+    assert "casca de arroz" not in san_casca.lower()
+    assert verificar_seguranca_termos(san_casca) is True
+
+    agro_acento = "ÁgroSpônge"
+    san_agro = sanitizar_texto(agro_acento)
+    assert "agrosponge" not in san_agro.lower()
+    assert "agro sponge" not in san_agro.lower()
+    assert verificar_seguranca_termos(san_agro) is True
+
+
 def test_sanitizacao_injecao_adversarial_na_pergunta():
     """Se o produtor rural ou LLM injetar termos proibidos, o motor sanitiza antes de retornar."""
     pergunta_maliciosa = "O agrosponge com casca de arroz e saco biodegradavel vai salvar minha lavoura?"
@@ -391,6 +413,69 @@ async def test_ollama_retorno_invalido_fallback():
 
         assert res["motor_utilizado"] == "motor_especialista_fallback"
         assert res["status"] == "sucesso"
+
+
+@pytest.mark.anyio
+async def test_seguranca_termos_antigos_dinamico():
+    """Valida cálculo dinâmico da flag seguranca_termos_antigos tanto no fallback quanto na LLM."""
+    # Cenário seguro determinístico (fallback)
+    res_fallback_seguro = executar_diagnostico_fallback(tensao_kpa=22.0)
+    assert res_fallback_seguro["seguranca_termos_antigos"] is True
+
+    # Cenário seguro com Ollama
+    with patch("backend.llm_engine.chamar_ollama_local", new_callable=AsyncMock) as mock_ollama:
+        mock_ollama.return_value = {
+            "estado_planta": "hidratada",
+            "bomba_status": "BOMBA DESLIGADA",
+            "diagnostico_texto": "Equilíbrio hídrico com biossensores Tekó Biotech.",
+            "recomendacao_manejo": "Manter monitoramento de rotina."
+        }
+        res_llm_seguro = await processar_diagnostico_llm(DiagnosticoLLMIn(tensao_kpa=22.0))
+        assert res_llm_seguro["seguranca_termos_antigos"] is True
+
+    # Cenário dinâmico caso a verificação aponte resíduo proibido
+    with patch("backend.llm_engine.chamar_ollama_local", new_callable=AsyncMock) as mock_ollama, \
+         patch("backend.llm_engine.verificar_seguranca_termos", return_value=False):
+        mock_ollama.return_value = {
+            "estado_planta": "hidratada",
+            "bomba_status": "BOMBA DESLIGADA",
+            "diagnostico_texto": "Texto qualquer",
+            "recomendacao_manejo": "Manejo qualquer"
+        }
+        res_llm_inseguro = await processar_diagnostico_llm(DiagnosticoLLMIn(tensao_kpa=22.0))
+        assert res_llm_inseguro["seguranca_termos_antigos"] is False
+
+
+@pytest.mark.anyio
+async def test_paradoxo_enchente_trava_soberana_contra_alucinacao_ollama():
+    """
+    Valida a Trava Soberana Físico-Agronômica do Paradoxo da Enchente:
+    Mesmo que o Ollama alucine 'sede' e 'LIGAR AMANHÃ ÀS 06H', sob ORP < -100 mV
+    o sistema impõe incondicionalmente estado 'hipoxia' e bomba 'NÃO LIGAR A BOMBA!',
+    anexando o alerta do Paradoxo da Enchente à recomendação.
+    """
+    with patch("backend.llm_engine.chamar_ollama_local", new_callable=AsyncMock) as mock_ollama:
+        mock_ollama.return_value = {
+            "estado_planta": "sede",
+            "bomba_status": "LIGAR AMANHÃ ÀS 06H",
+            "diagnostico_texto": "Folhas murchas por falta aparente de água. Irrigar urgentemente.",
+            "recomendacao_manejo": "Ligar a motobomba às 06h para recuperação do turgor."
+        }
+        dados = DiagnosticoLLMIn(
+            tensao_kpa=12.0,
+            tipo_solo="franco",
+            z_50k_ohms=6000.0,
+            z_1k_ohms=4800.0,
+            orp_mv=-140.0,
+            cultura="Milho"
+        )
+        res = await processar_diagnostico_llm(dados)
+
+        assert res["estado_planta"] == "hipoxia", "Estado não foi forçado para hipóxia sob ORP < -100 mV!"
+        assert res["bomba_status"] == "NÃO LIGAR A BOMBA!", "Bomba foi autorizada sob hipóxia / anóxia radicular!"
+        assert "Paradoxo da Enchente" in res["recomendacao_manejo"]
+        assert "NÃO LIGAR A BOMBA!" in res["recomendacao_manejo"] or "DESLIGADA" in res["recomendacao_manejo"]
+        assert res["seguranca_termos_antigos"] is True
 
 
 # ============================================================================

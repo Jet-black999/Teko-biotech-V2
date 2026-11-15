@@ -44,7 +44,7 @@ _httpx_async_client: Optional[httpx.AsyncClient] = None
 # POLÍTICA DE SEGURANÇA LÉXICA — FILTRO ANTI-TERMOS PROIBIDOS
 # ============================================================================
 REGEX_TERMOS_PROIBIDOS = re.compile(
-    r"\b(?:agro[- ]?sponge|cascas?\s+de\s+arroz|sacos?\s+biodegrad[aá]ve(?:l|is))\b",
+    r"\b(?:[aáàâã]?gro[- ]?sp[oóôõ]nge|cascas?\s+de\s+arroz|sacos?\s+biodegrad[aáàâã]ve(?:l|is))\b",
     re.IGNORECASE
 )
 
@@ -60,12 +60,13 @@ TERMOS_NORMALIZADOS_BLOQUEADOS = [
 
 
 def _substituir_termo_proibido(match: re.Match) -> str:
-    termo = match.group(0).lower()
-    if "sponge" in termo:
+    termo = unicodedata.normalize("NFKD", match.group(0).lower())
+    termo_sem_acento = "".join(c for c in termo if not unicodedata.combining(c))
+    if "sponge" in termo_sem_acento:
         return "biossensor fitoeletrônico in-planta Tekó"
-    elif "arroz" in termo:
+    elif "arroz" in termo_sem_acento:
         return "substrato orgânico calibrado"
-    elif "biodegrad" in termo:
+    elif "biodegrad" in termo_sem_acento:
         return "módulo de monitoramento"
     return "tecnologia Tekó Biotech"
 
@@ -73,11 +74,11 @@ def _substituir_termo_proibido(match: re.Match) -> str:
 def sanitizar_texto(texto: str) -> str:
     """
     Substitui ativamente qualquer termo legado proibido por terminologia
-    oficial da Tekó Biotech e valida a ausência de resíduos via normalização NFD.
+    oficial da Tekó Biotech e valida a ausência de resíduos via normalização NFD/NFC.
     """
     if not texto:
         return ""
-    atual = texto
+    atual = unicodedata.normalize("NFC", texto)
     for _ in range(3):
         if not REGEX_TERMOS_PROIBIDOS.search(atual):
             break
@@ -85,8 +86,20 @@ def sanitizar_texto(texto: str) -> str:
 
     # Verificação defensiva extra
     if not verificar_seguranca_termos(atual):
-        for padrao in TERMOS_NORMALIZADOS_BLOQUEADOS:
-            atual = re.sub(re.escape(padrao), "biossensor Tekó", atual, flags=re.IGNORECASE)
+        padroes_busca = [
+            (r"\b[aáàâã]?gro[- ]?sp[oóôõ]nge\b", "biossensor fitoeletrônico in-planta Tekó"),
+            (r"\bcascas?\s+de\s+arroz\b", "substrato orgânico calibrado"),
+            (r"\bsacos?\s+biodegrad[aáàâã]ve(?:l|is)\b", "módulo de monitoramento"),
+        ]
+        for padrao_regex, subst in padroes_busca:
+            atual = re.sub(padrao_regex, subst, atual, flags=re.IGNORECASE)
+
+        if not verificar_seguranca_termos(atual):
+            for padrao in TERMOS_NORMALIZADOS_BLOQUEADOS:
+                padrao_nfc = unicodedata.normalize("NFC", padrao)
+                atual = re.sub(re.escape(padrao_nfc), "biossensor Tekó", atual, flags=re.IGNORECASE)
+                padrao_com_acento = padrao_nfc.replace("biodegradavel", "biodegradável").replace("biodegradaveis", "biodegradáveis")
+                atual = re.sub(re.escape(padrao_com_acento), "biossensor Tekó", atual, flags=re.IGNORECASE)
 
     return atual
 
@@ -287,6 +300,15 @@ def executar_diagnostico_fallback(
     diagnostico_limpo = sanitizar_texto(diagnostico_texto)
     recomendacao_limpa = sanitizar_texto(recomendacao_manejo)
 
+    # Invariante universal: sob hipóxia, a motobomba deve permanecer estritamente desligada
+    if estado_planta == "hipoxia":
+        bomba_status = "NÃO LIGAR A BOMBA!"
+
+    seguranca_ok = bool(
+        verificar_seguranca_termos(diagnostico_limpo)
+        and verificar_seguranca_termos(recomendacao_limpa)
+    )
+
     tempo_resposta_ms = round((time.perf_counter() - t_inicio) * 1000.0, 3)
 
     return {
@@ -297,7 +319,7 @@ def executar_diagnostico_fallback(
         "motor_utilizado": "motor_especialista_fallback",
         "diagnostico_texto": diagnostico_limpo,
         "recomendacao_manejo": recomendacao_limpa,
-        "seguranca_termos_antigos": True
+        "seguranca_termos_antigos": seguranca_ok
     }
 
 
@@ -441,6 +463,11 @@ async def processar_diagnostico_llm(
             t_inicio=t_inicio
         )
 
+    solo_chave = normalizar_tipo_solo(tipo_solo)
+    cfg_solo = TABELA_SOLOS_PARAMETROS[solo_chave]
+    limite_hipoxia = cfg_solo["cc_kpa"] * 0.45
+    eh_hipoxia_fisica = (orp_mv < -100.0) or (tensao_kpa < limite_hipoxia)
+
     prompt = construir_prompt_fitoeletronico(
         tensao_kpa=tensao_kpa,
         tipo_solo=tipo_solo,
@@ -457,27 +484,6 @@ async def processar_diagnostico_llm(
         resultado_llm = None
 
     if resultado_llm and isinstance(resultado_llm, dict):
-        estado = str(resultado_llm.get("estado_planta", "")).strip().lower()
-        if estado not in ("hidratada", "sede", "hipoxia"):
-            # Ajusta estado pelo critério físico se a LLM alucinar
-            solo_chave = normalizar_tipo_solo(tipo_solo)
-            limite_hipoxia = TABELA_SOLOS_PARAMETROS[solo_chave]["cc_kpa"] * 0.45
-            if orp_mv < -100.0 or tensao_kpa < limite_hipoxia:
-                estado = "hipoxia"
-            elif tensao_kpa > TABELA_SOLOS_PARAMETROS[solo_chave]["estresse_kpa"] or z_50k_ohms >= 4500.0:
-                estado = "sede"
-            else:
-                estado = "hidratada"
-
-        bomba = str(resultado_llm.get("bomba_status", "")).strip().upper()
-        if bomba not in ("BOMBA DESLIGADA", "LIGAR AMANHÃ ÀS 06H", "NÃO LIGAR A BOMBA!"):
-            if estado == "hipoxia":
-                bomba = "NÃO LIGAR A BOMBA!"
-            elif estado == "sede":
-                bomba = "LIGAR AMANHÃ ÀS 06H"
-            else:
-                bomba = "BOMBA DESLIGADA"
-
         diagnostico_raw = str(resultado_llm.get("diagnostico_texto", "")).strip()
         recomendacao_raw = str(resultado_llm.get("recomendacao_manejo", "")).strip()
 
@@ -494,8 +500,61 @@ async def processar_diagnostico_llm(
                 t_inicio=t_inicio
             )
 
+        estado = str(resultado_llm.get("estado_planta", "")).strip().lower()
+        if estado not in ("hidratada", "sede", "hipoxia"):
+            # Ajusta estado pelo critério físico se a LLM alucinar
+            if eh_hipoxia_fisica:
+                estado = "hipoxia"
+            elif tensao_kpa > cfg_solo["estresse_kpa"] or z_50k_ohms >= 4500.0:
+                estado = "sede"
+            else:
+                estado = "hidratada"
+
+        bomba = str(resultado_llm.get("bomba_status", "")).strip().upper()
+        if bomba not in ("BOMBA DESLIGADA", "LIGAR AMANHÃ ÀS 06H", "NÃO LIGAR A BOMBA!"):
+            if estado == "hipoxia":
+                bomba = "NÃO LIGAR A BOMBA!"
+            elif estado == "sede":
+                bomba = "LIGAR AMANHÃ ÀS 06H"
+            else:
+                bomba = "BOMBA DESLIGADA"
+
         diagnostico_limpo = sanitizar_texto(diagnostico_raw)
         recomendacao_limpa = sanitizar_texto(recomendacao_raw)
+
+        # ====================================================================
+        # TRAVA SOBERANA FÍSICO-AGRONÔMICA (PARADOXO DA ENCHENTE / HIPÓXIA)
+        # ====================================================================
+        aviso_paradoxo_enchente = (
+            "Alerta: sob anóxia/hipóxia radicular (ORP < -100 mV), as aquaporinas estão inibidas "
+            "(Paradoxo da Enchente). A motobomba deve permanecer estritamente DESLIGADA."
+        )
+
+        if eh_hipoxia_fisica:
+            # A física rizosférica é soberana e absoluta: prevalece sobre alucinação da LLM
+            estado = "hipoxia"
+            bomba = "NÃO LIGAR A BOMBA!"
+
+            recomendou_irrigar = (
+                resultado_llm.get("bomba_status", "").strip().upper() == "LIGAR AMANHÃ ÀS 06H"
+                or resultado_llm.get("estado_planta", "").strip().lower() == "sede"
+                or any(termo in recomendacao_limpa.lower() for termo in ("ligar", "irrig", "regar", "acionar bomba", "lâmina", "lamina"))
+                or any(termo in diagnostico_limpo.lower() for termo in ("ligar", "irrig", "regar", "acionar bomba"))
+            )
+            if recomendou_irrigar:
+                if aviso_paradoxo_enchente not in recomendacao_limpa:
+                    recomendacao_limpa = f"{aviso_paradoxo_enchente} {recomendacao_limpa}".strip()
+                if aviso_paradoxo_enchente not in diagnostico_limpo:
+                    diagnostico_limpo = f"{aviso_paradoxo_enchente} {diagnostico_limpo}".strip()
+
+        # Invariante universal em todos os caminhos: se hipóxia, bomba NUNCA pode ser ligada
+        if estado == "hipoxia":
+            bomba = "NÃO LIGAR A BOMBA!"
+
+        seguranca_ok = bool(
+            verificar_seguranca_termos(diagnostico_limpo)
+            and verificar_seguranca_termos(recomendacao_limpa)
+        )
         tempo_ms = round((time.perf_counter() - t_inicio) * 1000.0, 3)
 
         return {
@@ -506,7 +565,7 @@ async def processar_diagnostico_llm(
             "motor_utilizado": "ollama_local",
             "diagnostico_texto": diagnostico_limpo,
             "recomendacao_manejo": recomendacao_limpa,
-            "seguranca_termos_antigos": True
+            "seguranca_termos_antigos": seguranca_ok
         }
 
     # Aciona o motor especialista fitoeletrônico determinístico
