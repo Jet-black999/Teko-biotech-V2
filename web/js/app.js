@@ -18,7 +18,6 @@ import {
   calcularAguaDisponivel, 
   classificarEstadoSolo,
   calcularPredicaoSecagem,
-  calcularUmidadeVanGenuchten,
   calcularLaminaIrrigacao
 } from './content.js?v=22';
 import { iniciarTelegram } from './telegram.js?v=22';
@@ -306,13 +305,13 @@ function normalizarChaveSoloParaLimiar(soloSistema) {
 function obterFaseAtiva() {
   const chave = extrairChaveCultura(perfilCulturaAtual);
   const cultura = MATRIZ_FASES_CULTURA[chave];
-  if (!cultura || !cultura.fases || cultura.fases.length === 0) return null;
+  if (!cultura?.fases?.length) return null;
   const idx = Math.min(Math.max(0, faseIndexAtual), cultura.fases.length - 1);
   return { ...cultura.fases[idx], culturaNome: cultura.nome, icone: cultura.icone, chave };
 }
 
 function obterLimiteKpaFase(fase, soloKey = tipoSoloAtual) {
-  if (!fase || !fase.limiaresKpa) {
+  if (!fase?.limiaresKpa) {
     return PERFIS_CULTURA[perfilCulturaAtual]?.manejoKpa || 30;
   }
   const soloNorm = normalizarChaveSoloParaLimiar(soloKey);
@@ -326,8 +325,8 @@ function atualizarSeletorFaseCulturaUi() {
   if (!selectFase || !dadosCultura) return;
 
   const salvoKey = `teko_fase_${chave}`;
-  const salvoVal = parseInt(localStorage.getItem(salvoKey), 10);
-  faseIndexAtual = !isNaN(salvoVal) && salvoVal >= 0 && salvoVal < dadosCultura.fases.length ? salvoVal : 0;
+  const salvoVal = Number.parseInt(localStorage.getItem(salvoKey), 10);
+  faseIndexAtual = !Number.isNaN(salvoVal) && salvoVal >= 0 && salvoVal < dadosCultura.fases.length ? salvoVal : 0;
 
   selectFase.innerHTML = '';
   dadosCultura.fases.forEach((f, idx) => {
@@ -377,7 +376,7 @@ function initSeletorCultura() {
   const selectFase = document.getElementById('select-fase-cultura');
   if (selectFase) {
     selectFase.addEventListener('change', () => {
-      faseIndexAtual = parseInt(selectFase.value, 10) || 0;
+      faseIndexAtual = Number.parseInt(selectFase.value, 10) || 0;
       const chave = extrairChaveCultura(perfilCulturaAtual);
       localStorage.setItem(`teko_fase_${chave}`, faseIndexAtual);
       atualizarDadosFaseUi();
@@ -496,13 +495,36 @@ function atualizarBotoesCulturaUi(culturaAtiva) {
   });
 }
 
+function resolverLimiteFinalKpa(limiteOverride, fase) {
+  if (limiteOverride !== null && !Number.isNaN(limiteOverride)) {
+    return Number.parseFloat(limiteOverride);
+  }
+  if (fase) {
+    return obterLimiteKpaFase(fase, tipoSoloAtual);
+  }
+  return PERFIS_CULTURA[perfilCulturaAtual]?.manejoKpa || 28;
+}
+
+function formatarStatusDiasRestantes(diasRestantes) {
+  if (diasRestantes <= 0) {
+    return { texto: '0 dias (CRÍTICO)', cor: '#ef4444' };
+  }
+  if (diasRestantes <= 1.0) {
+    return { texto: `${diasRestantes} dia (< 24h)`, cor: '#ef4444' };
+  }
+  if (diasRestantes <= 3.0) {
+    return { texto: `${diasRestantes} dias (Atenção)`, cor: '#f59e0b' };
+  }
+  return { texto: `${diasRestantes} dias (Seguro)`, cor: '#10b981' };
+}
+
 export function atualizarPredicaoUi(tensaoOverride = null, limiteOverride = null) {
-  const t = tensaoOverride !== null ? parseFloat(tensaoOverride) : (parseFloat(tensaoAtualKpa) || 21.5);
+  const t = tensaoOverride !== null 
+    ? Number.parseFloat(tensaoOverride) 
+    : (Number.parseFloat(tensaoAtualKpa) || 21.5);
   const taxaPadrao = PERFIS_CULTURA[perfilCulturaAtual]?.taxaSecagemPadrao || 2.0;
   const fase = obterFaseAtiva();
-  const limiteFinal = (limiteOverride !== null && !isNaN(limiteOverride)) 
-    ? parseFloat(limiteOverride) 
-    : (fase ? obterLimiteKpaFase(fase, tipoSoloAtual) : (PERFIS_CULTURA[perfilCulturaAtual]?.manejoKpa || 28));
+  const limiteFinal = resolverLimiteFinalKpa(limiteOverride, fase);
 
   const pred = calcularPredicaoSecagem(t, perfilCulturaAtual, taxaPadrao, limiteFinal);
 
@@ -512,19 +534,9 @@ export function atualizarPredicaoUi(tensaoOverride = null, limiteOverride = null
 
   if (taxaEl) taxaEl.textContent = `${pred.taxaSecagemKpaDia.toFixed(1)} kPa/dia`;
   if (diasEl) {
-    if (pred.diasRestantes <= 0) {
-      diasEl.textContent = '0 dias (CRÍTICO)';
-      diasEl.style.color = '#ef4444';
-    } else if (pred.diasRestantes <= 1.0) {
-      diasEl.textContent = `${pred.diasRestantes} dia (< 24h)`;
-      diasEl.style.color = '#ef4444';
-    } else if (pred.diasRestantes <= 3.0) {
-      diasEl.textContent = `${pred.diasRestantes} dias (Atenção)`;
-      diasEl.style.color = '#f59e0b';
-    } else {
-      diasEl.textContent = `${pred.diasRestantes} dias (Seguro)`;
-      diasEl.style.color = '#10b981';
-    }
+    const statusDias = formatarStatusDiasRestantes(pred.diasRestantes);
+    diasEl.textContent = statusDias.texto;
+    diasEl.style.color = statusDias.cor;
   }
   if (msgEl) {
     msgEl.textContent = pred.mensagem;
@@ -933,7 +945,6 @@ export function aplicarEstado(estadoKey) {
 
   estadoAtual = estadoKey;
 
-  const cfg = CONFIG_SOLOS[tipoSoloAtual] || CONFIG_SOLOS.franco;
   if (estadoKey === 'hipoxia') {
     tensaoAtualKpa = 2.0; // Solo Saturado
   } else if (estadoKey === 'sede') {
@@ -1152,7 +1163,7 @@ function initEngenharia() {
       });
       btn.classList.add('ativo');
       btn.setAttribute('aria-selected', 'true');
-      const culturaTab = btn.getAttribute('data-cultura-tab') || 'milho';
+      const culturaTab = btn.dataset.culturaTab || 'milho';
       renderizarTabelaFasesFenologicas(culturaTab);
     });
   });
@@ -1163,7 +1174,7 @@ function renderizarTabelaFasesFenologicas(culturaKey = 'milho') {
   if (!container) return;
 
   const dados = MATRIZ_FASES_CULTURA[culturaKey];
-  if (!dados || !dados.fases) return;
+  if (!dados?.fases) return;
 
   let html = `
     <table class="tabela-estado-hidrico" style="width: 100%; border-collapse: collapse;">
@@ -1233,12 +1244,35 @@ function renderizarTabelaVanGenuchten() {
   `;
 
   VAN_GENUCHTEN_SOLOS.forEach((s) => {
-    const tr = typeof s.thetaR === 'number' ? s.thetaR : (typeof s.theta_r === 'number' ? s.theta_r : 0.05);
-    const ts = typeof s.thetaS === 'number' ? s.thetaS : (typeof s.theta_s === 'number' ? s.theta_s : 0.40);
+    let tr = 0.05;
+    if (typeof s.thetaR === 'number') {
+      tr = s.thetaR;
+    } else if (typeof s.theta_r === 'number') {
+      tr = s.theta_r;
+    }
+
+    let ts = 0.40;
+    if (typeof s.thetaS === 'number') {
+      ts = s.thetaS;
+    } else if (typeof s.theta_s === 'number') {
+      ts = s.theta_s;
+    }
+
     const al = typeof s.alpha === 'number' ? s.alpha : 0.1;
     const n = typeof s.n === 'number' ? s.n : 1.5;
     const m = typeof s.m === 'number' ? s.m : (1.0 - (1.0 / n));
-    const cc = s.ccKpa || (s.categoria === 'arenoso' ? 10 : (s.categoria === 'argiloso' ? 33 : 22));
+
+    let cc = s.ccKpa;
+    if (!cc) {
+      if (s.categoria === 'arenoso') {
+        cc = 10;
+      } else if (s.categoria === 'argiloso') {
+        cc = 33;
+      } else {
+        cc = 22;
+      }
+    }
+
     const pmp = s.pmpKpa || 1500;
 
     html += `

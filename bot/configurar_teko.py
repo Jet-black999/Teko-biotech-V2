@@ -65,7 +65,7 @@ def provisionar_teko(token: str, webapp_url: str = DEFAULT_WEBAPP_URL) -> bool:
                 with open(avatar_path, "rb") as f_img:
                     sucesso_foto = bot.set_my_profile_photo(InputProfilePhotoStatic(photo=f_img))
                     if sucesso_foto:
-                        print(f"  • Foto de perfil oficial do Tekó atualizada no Telegram com sucesso.")
+                        print("  • Foto de perfil oficial do Tekó atualizada no Telegram com sucesso.")
             except Exception as e:
                 print(f"  ⚠️ Aviso ao definir foto de perfil: {e}")
 

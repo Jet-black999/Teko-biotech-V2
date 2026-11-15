@@ -6,6 +6,7 @@ Hackathon das Engenharias UERGS 2026 — Desafio 02: Água e Drenagem Rural
 import os
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -85,10 +86,22 @@ TEMPO_EXPIRACAO_FISICO_SEG = 30  # Se não receber dados em 30s, considera offli
 _ultimo_alerta_ts: Dict[str, float] = {}
 INTERVALO_MIN_ALERTA_SEG = 60.0
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        inicializar_banco()
+        print("[SQLite] Banco de dados e perfis Embrapa inicializados com sucesso.")
+    except Exception as exc:
+        print(f"[SQLite Init] Falha ao inicializar banco: {exc}")
+    yield
+
+
 app = FastAPI(
     title="Tekó Biotech API",
     description="Servidor de telemetria fitoeletrônica in-planta para agricultura familiar e resiliência climática.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Habilita CORS amplo para integração suave com WebApp (GitHub Pages, Netlify e Localhost)
@@ -900,15 +913,6 @@ def enviar_alerta_preditivo_telegram(texto_alerta: str, tipo_alerta: str = "pred
                 print(f"[Telegram Push Preditivo] Erro {resp.status_code}: {resp.text}")
     except Exception as exc:
         print(f"[Telegram Push Preditivo] Falha ao enviar alerta Telegram: {exc}")
-
-
-@app.on_event("startup")
-def startup_event():
-    try:
-        inicializar_banco()
-        print("[SQLite] Banco de dados e perfis Embrapa inicializados com sucesso.")
-    except Exception as exc:
-        print(f"[SQLite Init] Falha ao inicializar banco: {exc}")
 
 
 @app.get("/api/perfis-cultura")

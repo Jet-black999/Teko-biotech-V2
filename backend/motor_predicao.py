@@ -217,7 +217,7 @@ def calcular_van_genuchten(h_kpa: float, classe: str = "Franco (Loam)") -> Dict[
     n = solo["n"]
     m = solo["m"]
 
-    if h == 0.0:
+    if abs(h) < 1e-6:
         theta = theta_s
     else:
         denominador = (1.0 + (alpha * h) ** n) ** m

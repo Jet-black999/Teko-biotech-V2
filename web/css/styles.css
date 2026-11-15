@@ -2033,9 +2033,9 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
 }
 
 [data-theme="light"] .gateway-log-box {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #334155;
+  background: #FAF6EE;
+  border-color: #d8cfc0;
+  color: #252A26;
 }
 
 [data-theme="light"] .nav-tab-btn {
@@ -2230,10 +2230,10 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
 .receita-aviso-clima {
   font-size: 0.8rem;
   color: #38bdf8;
-  background: rgba(56, 189, 248, 0.08);
+  background: #082f49;
   padding: 8px 10px;
   border-radius: 6px;
-  border-left: 3px solid #38bdf8;
+  border-left: 3px solid #0284c7;
 }
 
 .card-matriz-fases-box,
@@ -2292,7 +2292,7 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .btn-tab-fase.ativo {
@@ -2341,14 +2341,20 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
 }
 
 .btn-simular-alerta {
-  background: rgba(245, 158, 11, 0.15);
+  background: #451a03;
   border: 1px solid #f59e0b;
-  color: #f59e0b;
+  color: #fbbf24;
   padding: 3px 8px;
   border-radius: 4px;
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+[data-theme="light"] .btn-simular-alerta {
+  background: #fef3c7;
+  border-color: #d97706;
+  color: #92400e;
 }
 
 .ninhura-gateway-sub {
@@ -2525,7 +2531,7 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
 }
 
 [data-theme="light"] .clima-banner-recomendacao {
-  background: rgba(36, 76, 60, 0.1);
+  background: #eaf3ec;
   border-left-color: var(--brand-forest);
   color: #1e3f2e;
   font-weight: 600;
@@ -2605,12 +2611,6 @@ h2, h3, .subtitulo-secao, .btn-solo strong, .receita-rotulo {
 [data-theme="light"] .txt-status-estresse { color: #9a3412; font-weight: 600; }
 [data-theme="light"] .txt-status-severo { color: #991b1b; font-weight: 600; }
 [data-theme="light"] .txt-status-pmp { color: #7f1d1d; font-weight: 700; }
-
-[data-theme="light"] .gateway-log-box {
-  background: #FAF6EE;
-  border-color: #d8cfc0;
-  color: #252A26;
-}
 
 [data-theme="light"] .gateway-log-box .log-destaque {
   color: #0284c7;
