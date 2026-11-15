@@ -27,9 +27,10 @@ LONG_DESC = (
     "O biossensor na planta sentinela mede a água no caule e o oxigênio da raiz:\n"
     "- Prevenção de estresse hídrico invisível e taxa de secagem (Embrapa)\n"
     "- Alerta de enchente, asfixia radicular e Laudo PROAGRO\n"
-    "- Economia de milhares de litros de água e combustível\n"
+    "- Simulador 3D interativo do biossensor no Mini App\n"
+    "- Atendimento por áudio de voz (.ogg) com IA fitoeletrônica local\n"
     "- Acessibilidade com botões grandes e zero digitação\n\n"
-    "Toque em Começar para iniciar!"
+    "Toque em Começar ou envie um áudio para iniciar!"
 )
 
 COMANDOS_TEKO = [
@@ -41,7 +42,7 @@ COMANDOS_TEKO = [
     BotCommand("duvidas", "Dúvidas sobre o clipe e a bateria")
 ]
 
-DEFAULT_WEBAPP_URL = "https://brunoluiztv.github.io/PROJETO-HACKATON-2026/?v=21"
+DEFAULT_WEBAPP_URL = "https://brunoluiztv.github.io/PROJETO-HACKATON-2026/?v=23"
 
 
 def provisionar_teko(token: str, webapp_url: str = DEFAULT_WEBAPP_URL) -> bool:
