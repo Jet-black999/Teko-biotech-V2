@@ -253,7 +253,7 @@ def handle_voice(message):
             )
             bot.send_message(message.chat.id, resposta_texto, reply_markup=main_menu_keyboard())
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Erro ao processar áudio de voz")
         bot.send_message(
             message.chat.id,

@@ -258,16 +258,21 @@ def test_gerenciador_audio_temporario_ciclo_normal():
 
 
 def test_gerenciador_audio_temporario_resiliencia_excecao():
-    caminho_salvo = None
-    with pytest.raises(RuntimeError):
+    caminhos_criados = []
+
+    def _simular_falha_durante_processamento():
         with gerenciador_audio_temporario(b"dados_temporarios") as caminho:
-            caminho_salvo = caminho
-            assert os.path.exists(caminho)
+            caminhos_criados.append(caminho)
+            if not os.path.exists(caminho):
+                raise AssertionError("Arquivo temporário deveria existir dentro do bloco")
             raise RuntimeError("Falha proposital para teste de cleanup")
 
+    with pytest.raises(RuntimeError):
+        _simular_falha_durante_processamento()
+
     # Arquivo deve ser excluído mesmo após exceção
-    assert caminho_salvo is not None
-    assert not os.path.exists(caminho_salvo)
+    assert len(caminhos_criados) == 1
+    assert not os.path.exists(caminhos_criados[0])
 
 
 # ============================================================================
