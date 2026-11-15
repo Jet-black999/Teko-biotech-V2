@@ -4,8 +4,9 @@
  * 4 Abas Especializadas: 1. Planta | 2. Triagem & Receita | 3. Gráficos & Hectares | 4. Engenharia & Gateway
  */
 
-import { initPlantCanvas } from './canvas_planta.js?v=22';
-import { initCharts, renderChartSecagem } from './charts.js?v=22';
+import { initPlantCanvas } from './canvas_planta.js?v=23';
+import { initPlant3D, isWebGLAvailable } from './simulador_3d.js?v=23';
+import { initCharts, renderChartSecagem } from './charts.js?v=23';
 import { 
   TELEMETRIA_ESTADOS, 
   FAQ_PRODUTOR, 
@@ -19,10 +20,12 @@ import {
   classificarEstadoSolo,
   calcularPredicaoSecagem,
   calcularLaminaIrrigacao
-} from './content.js?v=22';
-import { iniciarTelegram } from './telegram.js?v=22';
+} from './content.js?v=23';
+import { iniciarTelegram } from './telegram.js?v=23';
 
 let plantCanvasController = null;
+let plant3DController = null;
+let modoVisualizacao = '2d';
 let estadoAtual = 'hidratada';
 let tipoSoloAtual = localStorage.getItem('teko_tipo_solo') || localStorage.getItem('phytosense_tipo_solo') || 'franco';
 let perfilCulturaAtual = localStorage.getItem('teko_perfil_cultura') || localStorage.getItem('phytosense_perfil_cultura') || 'olericultura_alface_argissolo';
@@ -80,6 +83,10 @@ function initThemeManager() {
         btnClaro.classList.remove('ativo');
         btnClaro.setAttribute('aria-checked', 'false');
       }
+    }
+
+    if (plant3DController) {
+      plant3DController.setTheme(tema === 'light');
     }
 
     if (salvar) {
@@ -155,6 +162,16 @@ export function ativarAba(targetId) {
     }
   });
 
+  // Gerenciamento de ciclo de vida do simulador 3D ao alternar abas
+  if (targetId === 'aba-minha-planta') {
+    if (modoVisualizacao === '3d' && plant3DController) {
+      plant3DController.resume();
+      plant3DController.resize();
+    }
+  } else if (plant3DController) {
+    plant3DController.pause();
+  }
+
   // Se ativou gráficos ou planta, garante redimensionamento
   if (targetId === 'aba-graficos' || targetId === 'aba-minha-planta') {
     setTimeout(() => {
@@ -164,13 +181,130 @@ export function ativarAba(targetId) {
 }
 
 /**
- * 3. Inicialização do Canvas Interativo da Planta Sentinela
+ * 3. Inicialização dos Visualizadores da Planta Sentinela (2D Canvas e 3D Three.js WebGL)
  */
 function initCanvas() {
-  const canvasEl = document.getElementById('canvas-planta');
-  if (canvasEl) {
-    plantCanvasController = initPlantCanvas(canvasEl);
+  const canvas2DEl = document.getElementById('canvas-planta');
+  const canvas3DEl = document.getElementById('canvas-planta-3d');
+  const btnView2D = document.getElementById('btn-view-2d');
+  const btnView3D = document.getElementById('btn-view-3d');
+  const btnResetCam = document.getElementById('btn-reset-cam-3d');
+  const hint3D = document.getElementById('canvas-3d-hint');
+  const liveRegion = document.getElementById('sr-anuncios');
+
+  if (canvas2DEl) {
+    plantCanvasController = initPlantCanvas(canvas2DEl);
   }
+
+  const webglDisponivel = isWebGLAvailable();
+
+  function anunciar(msg) {
+    if (liveRegion) {
+      liveRegion.textContent = msg;
+    }
+  }
+
+  function alternarPara2D(motivo = '') {
+    modoVisualizacao = '2d';
+    if (canvas2DEl) canvas2DEl.hidden = false;
+    if (canvas3DEl) canvas3DEl.hidden = true;
+    if (hint3D) hint3D.hidden = true;
+    if (btnResetCam) btnResetCam.hidden = true;
+
+    if (btnView2D) {
+      btnView2D.classList.add('ativo');
+      btnView2D.setAttribute('aria-pressed', 'true');
+    }
+    if (btnView3D) {
+      btnView3D.classList.remove('ativo');
+      btnView3D.setAttribute('aria-pressed', 'false');
+    }
+
+    if (plant3DController) {
+      plant3DController.pause();
+    }
+
+    anunciar(motivo || 'Visualização 2D esquemática fitoeletrônica ativada.');
+  }
+
+  function alternarPara3D() {
+    if (!webglDisponivel) {
+      anunciar('Aceleração 3D WebGL indisponível neste dispositivo. Mantendo visualização 2D fitoeletrônica.');
+      return;
+    }
+
+    modoVisualizacao = '3d';
+    if (canvas2DEl) canvas2DEl.hidden = true;
+    if (canvas3DEl) canvas3DEl.hidden = false;
+    if (hint3D) hint3D.hidden = false;
+    if (btnResetCam) btnResetCam.hidden = false;
+
+    if (btnView3D) {
+      btnView3D.classList.add('ativo');
+      btnView3D.setAttribute('aria-pressed', 'true');
+    }
+    if (btnView2D) {
+      btnView2D.classList.remove('ativo');
+      btnView2D.setAttribute('aria-pressed', 'false');
+    }
+
+    if (!plant3DController && canvas3DEl) {
+      plant3DController = initPlant3D(canvas3DEl);
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      if (plant3DController) {
+        plant3DController.setTheme(isLight);
+        plant3DController.setState(estadoAtual);
+      }
+    } else if (plant3DController) {
+      plant3DController.resume();
+      plant3DController.resize();
+    }
+
+    anunciar('Visualização 3D interativa Three.js ativada. Use toque, mouse ou setas do teclado para rotacionar o modelo fitoelétrico.');
+  }
+
+  if (btnView2D) {
+    btnView2D.addEventListener('click', () => alternarPara2D());
+  }
+
+  if (btnView3D) {
+    if (!webglDisponivel) {
+      btnView3D.setAttribute('aria-disabled', 'true');
+      btnView3D.title = 'Aceleração 3D WebGL indisponível neste navegador';
+      btnView3D.style.opacity = '0.5';
+      btnView3D.style.cursor = 'not-allowed';
+    }
+    btnView3D.addEventListener('click', () => alternarPara3D());
+  }
+
+  if (btnResetCam) {
+    btnResetCam.addEventListener('click', () => {
+      if (plant3DController) {
+        plant3DController.resetCamera();
+        anunciar('Câmera do modelo 3D redefinida para a posição frontal padrão.');
+      }
+    });
+  }
+
+  // Fallback automático se o contexto WebGL for perdido em tempo de execução
+  window.addEventListener('teko-webgl-lost', () => {
+    alternarPara2D('Contexto gráfico WebGL interrompido. Alternando automaticamente para visualização 2D.');
+  });
+
+  // Otimização de bateria e performance em segundo plano (document.hidden)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (plant3DController) {
+        plant3DController.pause();
+      }
+    } else {
+      const abaPlantaAtiva = !document.getElementById('aba-minha-planta')?.hidden;
+      if (abaPlantaAtiva && modoVisualizacao === '3d' && plant3DController) {
+        plant3DController.resume();
+        plant3DController.resize();
+      }
+    }
+  });
 }
 
 /**
@@ -965,6 +1099,9 @@ export function aplicarEstado(estadoKey) {
 
   if (plantCanvasController) {
     plantCanvasController.setState(estadoKey);
+  }
+  if (plant3DController) {
+    plant3DController.setState(estadoKey);
   }
 
   const badgeEl = document.getElementById('diag-badge');
