@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#244d3c">
+    <meta name="description" content="Prévia local das novas telas da Tekó Biotech V2. Todos os dados são fictícios.">
+    <title>Tekó Biotech · Prévia V2</title>
+    <link rel="icon" href="marca.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body data-direction="campo">
+    <a class="skip" href="#conteudo">Pular para o conteúdo</a>
+    <div class="review-bar" aria-label="Controles da prévia">
+      <span class="preview-label"><span class="preview-dot"></span> PRÉVIA V2 <span class="review-description">/ dados fictícios</span></span>
+      <div class="review-controls">
+        <label>Direção <select id="direction"><option value="campo">A · Campo</option><option value="observatorio">B · Observatório</option></select></label>
+        <label>Cenário <select id="scenario">
+          <option value="routine">Consulta diária</option>
+          <option value="empty">Primeira instalação</option>
+          <option value="pending">Primeira leitura pendente</option>
+          <option value="loading">Carregando</option>
+          <option value="api-cache">API offline · com última consulta</option>
+          <option value="api-empty">API offline · sem última consulta</option>
+          <option value="sensor-offline">Sensor sem comunicação</option>
+          <option value="stale">Leitura antiga · sensor conectado</option>
+          <option value="error">Erro de aquisição</option>
+          <option value="uncalibrated">Sensor sem calibração</option>
+          <option value="replaced">Sensor substituído</option>
+          <option value="unknown-time">Horário desconhecido</option>
+          <option value="no-history">Histórico sem resultados</option>
+        </select></label>
+      </div>
+    </div>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#inicio" aria-label="Tekó Biotech, início"><img src="marca.svg" alt="" width="42" height="42"><span>tekó<span class="brand-sub">BIOTECH</span></span></a>
+        <div class="workspace"><span class="eyebrow">ÁREA DE DEMONSTRAÇÃO</span><strong>Sítio Boa Raiz</strong><small>Instalação local · exemplo</small></div>
+        <nav id="navigation" aria-label="Navegação principal"></nav>
+        <div class="sidebar-note"><span class="leaf-mark" aria-hidden="true">↗</span><p>Mais clareza.<br>Mais perto do campo.</p><small>Tecnologia para acompanhar<br>o que você cultiva.</small></div>
+        <a class="sidebar-help" href="#instalacao">Guia de primeira conexão <span aria-hidden="true">↗</span></a>
+      </aside>
+      <div class="main-wrap">
+        <header class="topbar"><span id="breadcrumb">Monitoramento / Visão geral</span><span class="demo-badge">Demonstração</span></header>
+        <main id="conteudo" tabindex="-1"></main>
+        <footer class="footer"><span>Tekó Biotech · Cultivar começa por observar.</span><span>Relógio fictício: 16 nov 2026 · 10:42 · UTC−3</span></footer>
+      </div>
+    </div>
+    <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+    <noscript>Ative o JavaScript para navegar pela prévia. Não há conexão com sensores ou serviços externos.</noscript>
+  </body>
+</html>

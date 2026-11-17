@@ -1,5 +1,11 @@
 # tekó biotech — portal de monitoramento para agricultura familiar
 
+> **Evolução do fork V2:** o [plano de implementação](PLANO-IMPLEMENTACAO-V2.md) define a integração das funcionalidades e a reformulação das telas. Consulte esse plano para a direção atual; as seções abaixo descrevem a base herdada e serão atualizadas conforme cada entrega for concluída.
+
+Preparação registrada na [entrega 0](docs/ENTREGA-0-PREPARACAO-V2.md): fontes preservadas e recuperadas em ensaio, branch `chore/preparacao-v2` criada e verificações iniciais realizadas. A instalação limpa ainda depende de resolver os bloqueios documentados.
+
+**Novas telas V2:** a [prévia navegável](prototipo-v2/README.md) compara as direções Campo e Observatório e funciona sem instalação, com dados fictícios. Veja o [relatório da entrega 1](docs/ENTREGA-1-PREVIAS-V2.md); a escolha visual permanece pendente.
+
 Projeto desenvolvido no **Hackathon das Engenharias UERGS 2026** por uma equipe de três desenvolvedores. O objetivo é coletar medições em pontos distribuídos, armazenar o histórico e permitir ao agricultor consultar informações pelo celular, computador e Telegram.
 
 **A equipe adotou o nome tekó biotech; registro e domínio ainda estão em verificação.** Sensores e grandezas a medir continuam em definição. A arquitetura permite adaptar a apresentação sem vincular todo o sistema a um único sensor.
