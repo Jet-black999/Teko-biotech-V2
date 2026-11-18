@@ -1,220 +1,197 @@
-import os
-import sys
+"""Integração atual: contrato HTTP, autorização e confirmação de notificações."""
+import copy
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import pytest
+import requests
 
-import conteudo
-from roteamento import rotear
-from telemetria import DADOS_ESTADOS, calcular_economia_hectares, obter_telemetria_tempo_real
-
-
-def test_estados_telemetria():
-    assert set(DADOS_ESTADOS.keys()) == {"hidratada", "sede", "hipoxia"}
-
-    # Hidratada
-    h = DADOS_ESTADOS["hidratada"]
-    assert h["z_50k_kohm"] == 1.4
-    assert h["orp_mv"] == 310
-    assert h["bomba"] == "DESLIGADA"
-    assert h["laudo_proagro"] is False
-    assert h["tensao_kpa"] == 21.5
-
-    # Sede invisível
-    s = DADOS_ESTADOS["sede"]
-    assert s["z_50k_kohm"] == 4.8
-    assert s["orp_mv"] == 420
-    assert "06H" in s["bomba"]
-    assert s["laudo_proagro"] is False
-    assert s["tensao_kpa"] == 45.0
-
-    # Hipóxia / Enchente
-    hip = DADOS_ESTADOS["hipoxia"]
-    assert hip["z_50k_kohm"] == 5.9
-    assert hip["orp_mv"] == -140
-    assert hip["laudo_proagro"] is True
-    assert "NÃO LIGAR" in hip["bomba"]
-    assert hip["tensao_kpa"] == 4.2
+from backend_client import BackendClient, BackendError
+from monitoring import Monitoring, NotificationWorker, dashboard_link, reading_text
+import phytosense_bot as entry
 
 
-def test_obter_telemetria_tempo_real_fallback():
-    # URL inexistente deve acionar fallback resiliente sem lançar exceção
-    dados = obter_telemetria_tempo_real(backend_url="http://127.0.0.1:59999")
-    assert dados["online"] is False
-    assert dados["origem"] == "fallback_local"
-    assert dados["estado"] == "hidratada"
-    assert dados["tensao_kpa"] == 21.5
-    assert dados["sensor_fisico_online"] is False
+def config():
+    return {"authorized_chat_id": "123456", "dashboard_url": "http://notebook:5173", "lease_seconds": 60}
 
 
-def test_calculo_economia_hectares():
-    calc_1 = calcular_economia_hectares(1)
-    assert calc_1["hectares"] == 1.0
-    assert calc_1["sensores_sentinelas"] == 1
-    assert calc_1["litros_poupados_mes"] == 4200 * 8
-    assert calc_1["reais_economizados_mes"] == 38.0 * 8
-
-    calc_10 = calcular_economia_hectares(10)
-    assert calc_10["hectares"] == 10.0
-    assert calc_10["sensores_sentinelas"] == 10
-    assert calc_10["litros_poupados_mes"] == 10 * 4200 * 8
-
-    # Limites (1 a 15)
-    calc_min = calcular_economia_hectares(0.5)
-    assert calc_min["hectares"] == 1.0
-    calc_max = calcular_economia_hectares(25.0)
-    assert calc_max["hectares"] == 15.0
+def message(text="/status", chat_id=123456):
+    return SimpleNamespace(text=text, chat=SimpleNamespace(id=chat_id, type="private"))
 
 
-def test_roteamento_botoes_principais():
-    assert rotear(conteudo.BTN_PLANTA) == "planta"
-    assert rotear(conteudo.BTN_BOMBA) == "bomba"
-    assert rotear(conteudo.BTN_CHUVA) == "chuva"
-    assert rotear(conteudo.BTN_BATERIA) == "bateria"
-    assert rotear(conteudo.BTN_PAINEL) == "painel"
-    assert rotear(conteudo.BTN_SOLO) == "solo"
+def item():
+    return {"id": "notification-1", "chat_id": "123456", "text": "Simulação: valor < 30 & condição",
+            "lease_token": "segredo-da-reserva", "lease_expires_at": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()}
 
 
-def test_roteamento_atalhos_numericos():
-    assert rotear("1") == "planta"
-    assert rotear("2") == "bomba"
-    assert rotear("3") == "chuva"
-    assert rotear("4") == "bateria"
-    assert rotear("5") == "painel"
-    assert rotear("6") == "solo"
+def channel(value=0, kind="numeric"):
+    return {"name": "Sinal", "freshness": {"status": "stale"}, "reading": {
+        "profile_id": "signal-demo", "profile_version": 1, "source": "simulation", "quality": "valid",
+        "measured_at": None, "result": {"kind": kind, "value": value}}}
 
 
-def test_roteamento_palavras_chave():
-    assert rotear("Como está a saúde da sentinela?") == "planta"
-    assert rotear("Devo ligar a bomba hoje?") == "bomba"
-    assert rotear("A enchente alagou a raiz do milho") == "chuva"
-    assert rotear("De onde vem a energia da bateria?") == "bateria"
-    assert rotear("Gostaria de emitir o laudo do proagro") == "painel"
-    assert rotear("Como configurar o tipo de solo?") == "solo"
-    assert rotear("Meu solo é arenoso") == "solo"
-    assert rotear("A terra é muito argilosa") == "solo"
+def test_http_uses_internal_token_timeout_and_no_redirects():
+    transport = MagicMock()
+    transport.request.return_value.status_code = 200
+    transport.request.return_value.json.return_value = config()
+    client = BackendClient("http://backend:8000/", "internal-secret", transport)
+    assert client.config() == config()
+    args, kwargs = transport.request.call_args
+    assert args == ("GET", "http://backend:8000/api/v1/internal/bot-config")
+    assert kwargs["headers"]["Authorization"] == "Bearer internal-secret"
+    assert kwargs["allow_redirects"] is False
+    assert kwargs["timeout"] == (3, 5)
 
 
-def test_solos_info_existencia():
-    from telemetria import SOLOS_INFO
-    assert "arenoso" in SOLOS_INFO
-    assert "franco_arenoso" in SOLOS_INFO
-    assert "franco" in SOLOS_INFO
-    assert "argiloso" in SOLOS_INFO
-    assert SOLOS_INFO["arenoso"]["cc_kpa"] == 10.0
-    assert SOLOS_INFO["franco_arenoso"]["cc_kpa"] == 15.0
-    assert SOLOS_INFO["argiloso"]["cc_kpa"] == 33.0
+@pytest.mark.parametrize("code", [301, 401, 503])
+def test_http_failure_contains_no_token_or_body(code):
+    transport = MagicMock()
+    transport.request.return_value.status_code = code
+    with pytest.raises(BackendError) as error:
+        BackendClient("http://backend", "secret", transport).config()
+    assert "secret" not in str(error.value)
+    transport.request.return_value.json.assert_not_called()
 
 
-def test_roteamento_casos_borda():
-    assert rotear(None) == "fallback"
-    assert rotear("") == "fallback"
-    assert rotear("   ") == "fallback"
-    assert rotear("olá tudo bem") == "fallback"
-    # Dígito dentro de frase não deve rotear por atalho numérico
-    assert rotear("colhi 15 sacas de milho") == "fallback"
+def test_network_failure_has_no_fallback():
+    transport = MagicMock()
+    transport.request.side_effect = requests.ConnectionError("secret url")
+    with pytest.raises(BackendError, match="Não foi possível"):
+        BackendClient("http://backend", "secret", transport).config()
 
 
-def test_conteudo_proagro_e_duvidas():
-    assert "-140 mV" in conteudo.LAUDO_PROAGRO_TEXTO
-    assert "PROAGRO" in conteudo.LAUDO_PROAGRO_TEXTO
-    assert "mamona" in conteudo.DUVIDAS_PRODUTOR.lower()
-    assert "ágar" in conteudo.DUVIDAS_PRODUTOR.lower() or "agar" in conteudo.DUVIDAS_PRODUTOR.lower()
-    assert "bactérias" in conteudo.DUVIDAS_PRODUTOR.lower() or "bacterias" in conteudo.DUVIDAS_PRODUTOR.lower()
+def test_missing_chat_fails_closed():
+    api = BackendClient("http://backend", "secret")
+    with patch.object(api, "request", return_value={"authorized_chat_id": None}):
+        assert api.config()["authorized_chat_id"] is None
 
 
-def test_responder_telemetria_formata_dados_reais():
-    from phytosense_bot import responder_telemetria, bot
-    from unittest.mock import MagicMock
-
-    # Mock do envio de mensagem do bot
-    mock_send = MagicMock()
-    bot.send_message = mock_send
-
-    dados_reais = {
-        "online": True,
-        "sensor_fisico_online": True,
-        "tensao_kpa": 19.8,
-        "z_50k_ohms": 1520.0,
-        "orp_mv": 325.0,
-        "estado": "hidratada"
-    }
-
-    responder_telemetria(12345, estado="hidratada", dados_reais=dados_reais)
-    assert mock_send.called
-    msg_enviada = mock_send.call_args[0][1]
-    assert "19.8 kPa" in msg_enviada
-    assert "1.5 kΩ" in msg_enviada
-    assert "+325 mV" in msg_enviada
-    assert "SENSOR FÍSICO ESP32 ONLINE" in msg_enviada
+def test_zero_false_categories_error_and_time_unknown():
+    profiles = {("signal-demo", 1): {"unit": "%", "decimals": 1, "labels": {"no": "Não detectado"}, "choices": {"a": {"label": "Classe A"}}}}
+    assert "0,0 %" in reading_text(channel(), profiles)
+    assert "Não detectado" in reading_text(channel(False, "boolean"), profiles)
+    assert "Classe A" in reading_text(channel("a", "categorical"), profiles)
+    text = reading_text(channel(), profiles)
+    assert "simulação" in text and "leitura antiga" in text and "horário desconhecido" in text
+    failed = channel(); failed["reading"].update(quality="sensor_error", result=None)
+    assert "erro de aquisição" in reading_text(failed, profiles)
+    assert "sem leitura" in reading_text({"name": "Sinal", "reading": None}, profiles)
 
 
-def test_zero_termos_antigos_em_modulos_python():
-    termos_proibidos = ["saco biodegradavel", "sacos biodegradáveis", "casca de arroz", "agrosponge"]
-    arquivos = [conteudo.__file__, DADOS_ESTADOS.__class__.__module__]
-    
-    with open(conteudo.__file__, "r", encoding="utf-8") as f:
-        texto_conteudo = f.read().lower()
-        for t in termos_proibidos:
-            assert t not in texto_conteudo, f"Termo proibido encontrado em conteudo.py: {t}"
+@pytest.mark.parametrize("command", ["/status", "/sensores", "/alertas", "/painel", "/start"])
+def test_unauthorized_chat_cannot_query_monitoring(command):
+    with patch.object(entry, "api") as api, patch.object(entry, "monitor") as monitor, patch.object(entry.bot, "send_message") as send:
+        api.config.return_value = config()
+        entry.handle_questions(message(command, chat_id=999))
+        assert "não está autorizado" in send.call_args.args[1]
+        assert not monitor.mock_calls
 
 
-def test_identidade_teko_persona():
-    assert "Tekó" in conteudo.BOAS_VINDAS
-    assert "Tekó" in conteudo.AUDIO_RESPOSTA
-    assert "Tekó" in conteudo.DUVIDAS_PRODUTOR
-    assert "Tekó" in conteudo.LAUDO_PROAGRO_TEXTO
-    assert "harmonia com a terra" in conteudo.BOAS_VINDAS.lower()
+def test_unconfigured_chat_can_retrieve_id_for_setup_without_data_access():
+    with patch.object(entry, "api") as api, patch.object(entry, "monitor") as monitor, patch.object(entry.bot, "send_message") as send:
+        api.config.return_value = {"authorized_chat_id": None, "dashboard_url": None}
+        entry.handle_questions(message("/start", chat_id=987654))
+        assert "987654" in send.call_args.args[1]
+        assert "configure este ID" in send.call_args.args[1]
+        assert not monitor.mock_calls
+        api.claim.assert_not_called()
 
 
-def test_configurador_teko_declaracoes():
-    from configurar_teko import NOME_BOT, SHORT_DESC, LONG_DESC, COMANDOS_TEKO
-    assert "Tekó" in NOME_BOT
-    assert "lavoura" in SHORT_DESC.lower()
-    assert len(COMANDOS_TEKO) >= 5
-    cmd_nomes = [c.command for c in COMANDOS_TEKO]
-    assert "start" in cmd_nomes
-    assert "planta" in cmd_nomes
-    assert "bomba" in cmd_nomes
-    assert "previsao" in cmd_nomes
+def test_backend_offline_reports_unavailability_without_measurements():
+    with patch.object(entry, "api") as api, patch.object(entry.bot, "send_message") as send:
+        api.config.side_effect = BackendError("offline")
+        entry.handle_questions(message())
+        assert "Não consegui consultar" in send.call_args.args[1]
+        assert "hidratada" not in send.call_args.args[1]
 
 
-def test_audio_zero_digitacao_conteudo():
-    assert "zero digitação" in conteudo.AUDIO_RESPOSTA.lower()
-    assert "botões grandes" in conteudo.AUDIO_RESPOSTA.lower()
-    # Verifica que a promessa enganosa de transcrição foi removida
-    assert "ouviu seu áudio" not in conteudo.AUDIO_RESPOSTA.lower()
+def test_status_alias_calls_monitor():
+    with patch.object(entry, "api") as api, patch.object(entry, "monitor") as monitor, patch.object(entry.bot, "send_message") as send:
+        api.config.return_value = config(); monitor.status.return_value = "Leitura simulada 0 %"
+        entry.handle_questions(message("/planta@TekoBot"))
+        monitor.status.assert_called_once()
+        assert send.call_args.kwargs["parse_mode"] is None
 
 
-def test_resposta_chuva_drenagem_conteudo():
-    assert "drenando bem" in conteudo.RESPOSTA_CHUVA_NORMAL.lower()
-    assert "aeróbico" in conteudo.RESPOSTA_CHUVA_NORMAL.lower()
-    assert "bomba de irrigação deve permanecer desligada" in conteudo.RESPOSTA_CHUVA_NORMAL.lower()
+def test_local_panel_uses_ordinary_link_and_live_mode():
+    with patch.object(entry, "api") as api, patch.object(entry.bot, "send_message") as send:
+        api.config.return_value = config()
+        entry.handle_questions(message("/painel"))
+        button = send.call_args.kwargs["reply_markup"].keyboard[0][0]
+        assert button.url == "http://notebook:5173?mode=live"
+        assert button.web_app is None
+        assert "mesma rede" in send.call_args.args[1]
 
 
-def test_chuva_dinamica_raiz_saudavel():
-    from phytosense_bot import cmd_chuva, bot
-    from unittest.mock import MagicMock, patch
-
-    mock_send = MagicMock()
-    bot.send_message = mock_send
-
-    tele_saudavel = {
-        "online": True,
-        "sensor_fisico_online": True,
-        "tensao_kpa": 18.0,
-        "orp_mv": 320.0,
-        "estado": "hidratada"
-    }
-
-    mock_msg = MagicMock()
-    mock_msg.chat.id = 99999
-
-    with patch("phytosense_bot.obter_telemetria_tempo_real", return_value=tele_saudavel):
-        cmd_chuva(mock_msg)
-        assert mock_send.called
-        msg_enviada = mock_send.call_args[0][1]
-        assert "drenando bem" in msg_enviada.lower()
-        assert "18.0 kPa" in msg_enviada
-        assert "+320 mV" in msg_enviada
+def test_https_panel_uses_mini_app_in_private_chat_only():
+    cfg = {**config(), "dashboard_url": "https://painel.example/?node=node-1#history"}
+    assert entry.panel_keyboard(cfg).keyboard[0][0].web_app.url == "https://painel.example/?node=node-1&mode=live#history"
+    assert entry.panel_keyboard(cfg, private=False).keyboard[0][0].web_app is None
+    assert dashboard_link(None) is None
+    assert dashboard_link("javascript:alert(1)") is None
 
 
+def test_audio_does_not_download_or_invent_diagnosis():
+    with patch.object(entry, "api") as api, patch.object(entry.bot, "send_message") as send, patch.object(entry.bot, "get_file") as download:
+        api.config.return_value = config()
+        entry.handle_voice(message())
+        download.assert_not_called()
+        assert "não é interpretado" in send.call_args.args[1]
+
+
+def test_delivery_confirmed_after_send_with_real_message_id():
+    api = MagicMock(); api.config.return_value = config(); api.claim.return_value = [item()]
+    calls = []
+    sender = MagicMock(side_effect=lambda *args: (calls.append("send"), SimpleNamespace(message_id=42))[1])
+    api.settle.side_effect = lambda *args, **kwargs: calls.append("ack")
+    NotificationWorker(api, sender, "worker-1").tick()
+    assert calls == ["send", "ack"]
+    assert api.settle.call_args.args[2] == "delivered"
+    assert api.settle.call_args.kwargs == {"telegram_message_id": 42}
+    assert sender.call_args.args[1] == item()["text"]
+
+
+def test_send_failure_is_recorded_without_sensitive_exception():
+    api = MagicMock(); api.config.return_value = config(); api.claim.return_value = [item()]
+    sender = MagicMock(side_effect=RuntimeError("https://api.telegram.org/botSECRET"))
+    NotificationWorker(api, sender, "worker-1").tick()
+    assert api.settle.call_args.args[2] == "failed"
+    assert api.settle.call_args.kwargs == {"error": "telegram_send_failed"}
+
+
+def test_ack_retry_does_not_send_twice():
+    api = MagicMock(); api.config.return_value = config(); api.claim.return_value = [item()]
+    api.settle.side_effect = [BackendError("offline"), {}]
+    sender = MagicMock(return_value=SimpleNamespace(message_id=42))
+    worker = NotificationWorker(api, sender, "worker-1")
+    with pytest.raises(BackendError):
+        worker.tick()
+    worker.tick()
+    sender.assert_called_once()
+    api.claim.assert_called_once()
+    assert api.settle.call_count == 2
+
+
+def test_expired_ack_releases_worker_for_next_claim():
+    api = MagicMock(); api.config.return_value = config()
+    expired = item(); expired["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    api.claim.return_value = [expired]; api.settle.side_effect = BackendError("expired")
+    worker = NotificationWorker(api, MagicMock(return_value=SimpleNamespace(message_id=42)), "w")
+    with pytest.raises(BackendError): worker.tick()
+    assert worker.pending_ack is None
+
+
+def test_destination_mismatch_is_not_sent():
+    api = MagicMock(); api.config.return_value = config()
+    wrong = item(); wrong["chat_id"] = "999"; api.claim.return_value = [wrong]
+    sender = MagicMock()
+    NotificationWorker(api, sender, "worker-1").tick()
+    sender.assert_not_called()
+    assert api.settle.call_args.kwargs["error"] == "destination_changed"
+
+
+def test_unconfigured_chat_does_not_claim():
+    api = MagicMock(); api.config.side_effect = BackendError("no chat")
+    with pytest.raises(BackendError): NotificationWorker(api, MagicMock(), "w").tick()
+    api.claim.assert_not_called()

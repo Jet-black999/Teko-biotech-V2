@@ -23,6 +23,7 @@ class Settings:
     notification_lease_seconds: int = 60
     notification_max_attempts: int = 5
     notification_retry_seconds: int = 10
+    simulator_enabled: bool = False
 
     def __post_init__(self) -> None:
         path = self.database_path.expanduser()
@@ -87,6 +88,9 @@ def load_settings(environ: Mapping[str, str] | None = None, env_file: Path | Non
         retry = int(values.get("NOTIFICATION_RETRY_SECONDS", "10"))
     except ValueError as exc:
         raise ValueError("Opções de notificação devem ser inteiros.") from exc
+    simulator = values.get("SIMULATOR_ENABLED", "false").strip().lower()
+    if simulator not in {"true", "false"}:
+        raise ValueError("SIMULATOR_ENABLED deve ser true ou false.")
     return Settings(Path(database_path), timeout, origins, stale_after,
         values.get("AUTHORIZED_TELEGRAM_CHAT_ID", "").strip() or None,
-        values.get("DASHBOARD_URL", "").strip() or None, lease, attempts, retry)
+        values.get("DASHBOARD_URL", "").strip() or None, lease, attempts, retry, simulator == "true")

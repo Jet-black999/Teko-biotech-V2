@@ -11,7 +11,7 @@ from .seed import seed_demo
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Administração local do backend")
-    parser.add_argument("command", choices=("init-db", "seed-demo", "inspect-db", "issue-token", "issue-bot-token", "seed-alert-demo", "add-rule", "disable-rule", "requeue-notification"))
+    parser.add_argument("command", choices=("init-db", "prepare-simulator", "seed-demo", "inspect-db", "issue-token", "issue-bot-token", "seed-alert-demo", "add-rule", "disable-rule", "requeue-notification"))
     parser.add_argument("gateway_id", nargs="?", help="ID de gateway/regra/notificação ou caminho do JSON, conforme o comando")
     args = parser.parse_args()
     command = args.command
@@ -21,6 +21,9 @@ def main() -> None:
     database = Database(settings.database_path, settings.sqlite_timeout_seconds)
     if command == "init-db":
         result = {"database_path": str(database.path), "schema_version": database.initialize()}
+    elif command == "prepare-simulator":
+        from .services.simulator import prepare
+        result = prepare(database)
     elif command == "seed-demo":
         result = {"catalog": seed_demo(database)}
     elif command == "issue-token":

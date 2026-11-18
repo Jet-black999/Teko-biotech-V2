@@ -46,5 +46,7 @@ def authenticated_gateway(request: Request, credentials: HTTPAuthorizationCreden
         with request.app.state.database.connection(readonly=True) as connection:
             row = connection.execute("SELECT id FROM gateways WHERE token_hash=?", (token_hash(credentials.credentials),)).fetchone()
         if row is not None:
+            if row["id"] == "gateway-simulator" and request.url.path != "/api/v1/simulator/readings":
+                raise HTTPException(status_code=403, detail="Credencial restrita ao endpoint do simulador.")
             return row["id"]
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credencial de gateway ausente ou inválida.", headers={"WWW-Authenticate": "Bearer"})

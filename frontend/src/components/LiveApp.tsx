@@ -1,37 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, Bell, BookOpen, Copy, Cpu, History, LayoutDashboard, RefreshCw, Sprout, Wifi, WifiOff } from 'lucide-react';
+import { ArrowDownToLine, Bell, Copy, Cpu, History, LayoutDashboard, RefreshCw, Sprout, Wifi, WifiOff } from 'lucide-react';
 import { formatResult, inPeriod, toCsv, validReading, type Profile, type Reading } from '../domain/model';
 import { apiBase, loadAlerts, loadCatalog, loadHistory, loadLatest, loadUnknownTime, normalizeReading, type Alert, type Device, type LatestChannel, type NodeDevice } from '../data/api';
 import { dateLabel, HistoryChart, ReadingsTable } from './History';
-import { ProjectGuide } from './ProjectGuide';
+import { PanelActions, usePanelTools, FarmSummary } from './PanelTools';
 
 const tabs = [
-  { id: 'overview', label: 'Visão geral', icon: LayoutDashboard },
+  { id: 'overview', label: 'Início', icon: LayoutDashboard },
   { id: 'history', label: 'Histórico', icon: History },
-  { id: 'alerts', label: 'Alertas', icon: Bell },
-  { id: 'device', label: 'Dispositivo', icon: Cpu },
-  { id: 'guide', label: 'Lavoura', icon: BookOpen }
+  { id: 'alerts', label: 'Alertas', icon: Bell }
 ] as const;
-type Tab = typeof tabs[number]['id'];
-const initialColor = new URLSearchParams(location.search).get('lote');
+type Tab = typeof tabs[number]['id'] | 'device';
 const initialNode = new URLSearchParams(location.search).get('node') ?? '';
 const initialChannel = new URLSearchParams(location.search).get('channel') ?? '';
 function tabFromHash(): Tab {
   const hash = location.hash.slice(1);
-  if (['selo', 'graficos', 'usar', 'receita', 'triagem', 'simulacao'].includes(hash) || !hash && initialColor) return 'guide';
+  if (hash === 'device') return 'device';
   return tabs.some(t => t.id === hash) ? hash as Tab : 'overview';
 }
 const contactLabel = (status?: string) => ({ fresh: 'Comunicação recente', stale: 'Comunicação atrasada', unknown: 'Comunicação desconhecida', no_data: 'Sem comunicação' })[status as 'fresh'] ?? 'Sem informação';
 const pointLabel = (node: NodeDevice) => node.enabled === false ? 'Desativado' : contactLabel(node.radio_contact.status);
 const freshnessLabel = (status?: string) => ({ fresh: 'Leitura recente', stale: 'Leitura antiga', unknown: 'Recência desconhecida', no_data: 'Sem leitura' })[status as 'fresh'] ?? 'Sem informação';
 const when = (value: string | null | undefined) => value ? dateLabel(Date.parse(value)) : 'Horário desconhecido';
-const initialUrl = localStorage.getItem('agrosponge-api-url') || import.meta.env.VITE_API_BASE_URL || (location.protocol === 'http:' ? `${location.protocol}//${location.hostname}:8000` : '');
-
-export function LiveApp({ onDemo }: { onDemo: () => void }) {
+export function LiveApp() {
+  const { farm, apiUrl, open } = usePanelTools();
   const [tab, setTab] = useState<Tab>(tabFromHash);
-  const [urlDraft, setUrlDraft] = useState(initialUrl);
-  const [base, setBase] = useState(() => { try { return initialUrl ? apiBase(initialUrl) : ''; } catch { return ''; } });
-  const [connectError, setConnectError] = useState('');
+  const [base, setBase] = useState(() => { try { return apiUrl ? apiBase(apiUrl) : ''; } catch { return ''; } });
+  useEffect(() => {
+    setCatalog(null);
+    try { setBase(apiUrl ? apiBase(apiUrl) : ''); } catch { setBase(''); }
+  }, [apiUrl]);
   const [catalog, setCatalog] = useState<{ devices: Device[]; profiles: Profile[] } | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
@@ -85,12 +83,11 @@ export function LiveApp({ onDemo }: { onDemo: () => void }) {
     const controller = new AbortController();
     setCatalogLoading(true);
     setCatalogError('');
-    setCatalog(null);
     loadCatalog(base, controller.signal).then(setCatalog).catch(error => {
       if (!controller.signal.aborted) setCatalogError(error instanceof Error ? error.message : 'Falha ao carregar catálogo.');
     }).finally(() => { if (!controller.signal.aborted) setCatalogLoading(false); });
     return () => controller.abort();
-  }, [base]);
+  }, [base, revision]);
   useEffect(() => {
     if (!base || !node || !channel) return;
     const controller = new AbortController();
@@ -126,15 +123,6 @@ export function LiveApp({ onDemo }: { onDemo: () => void }) {
     return () => controller.abort();
   }, [base, node?.id, channel?.channel_id, hours, revision]);
 
-  function connect() {
-    try {
-      const value = apiBase(urlDraft);
-      localStorage.setItem('agrosponge-api-url', value);
-      setConnectError('');
-      setBase(value);
-      setRevision(n => n + 1);
-    } catch (error) { setConnectError(error instanceof Error ? error.message : 'Endereço inválido.'); }
-  }
   async function loadMore() {
     if (!base || !node || !channel || !nextCursor || moreLoading) return;
     const requestKey = pageKey.current;
@@ -162,7 +150,7 @@ export function LiveApp({ onDemo }: { onDemo: () => void }) {
     const url = new URL(location.href);
     url.search = '';
     url.searchParams.set('mode', 'live');
-    if (tab === 'guide' && initialColor && ['verde', 'amarelo', 'vermelho'].includes(initialColor)) url.searchParams.set('lote', initialColor);
+
     if (node) url.searchParams.set('node', node.id);
     if (channel) url.searchParams.set('channel', channel.channel_id);
     try { await navigator.clipboard.writeText(url.toString()); setMessage('Link do painel copiado.'); }
@@ -173,16 +161,16 @@ export function LiveApp({ onDemo }: { onDemo: () => void }) {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); document.getElementById('main')?.focus(); }}>Pular para conteúdo</a>
-    <aside className="sidebar"><a href="#overview" className="brand"><span className="brand-icon"><Sprout /></span><span>tekó <b>biotech</b><small>MONITORAMENTO NO CAMPO</small></span></a><div className="workspace"><span className="dot" /><div><strong>{node?.area_id ?? 'Área de monitoramento'}</strong><small>{node?.name ?? 'Conecte sua API'}</small></div></div><p className="nav-caption">ACOMPANHAMENTO</p><nav aria-label="Seções">{tabs.map(item => <a href={`#${item.id}`} key={item.id} aria-current={tab === item.id ? 'page' : undefined}><item.icon size={20} /><span>{item.label}</span></a>)}</nav><div className="sidebar-note"><Sprout size={22} /><strong>Do campo à informação.</strong><p>Leituras recebidas pelo notebook da equipe.</p><button onClick={share}><Copy size={16} /> Compartilhar painel</button></div><small className="sidebar-footer">API de monitoramento · v1</small></aside>
-    <div className="main-shell"><header className="topbar"><span>Monitoramento <span className="muted">/ {tabs.find(item => item.id === tab)?.label}</span></span><div className="topbar-actions"><span className="live-tag"><Wifi size={15} /> API</span><button className="mode-link" onClick={onDemo}>Ver demonstração</button></div></header>
+    <aside className="sidebar"><a href="#overview" className="brand"><span className="brand-icon"><Sprout /></span><span>tekó <b>biotech</b><small>MONITORAMENTO NO CAMPO</small></span></a><div className="workspace"><span className="dot" /><div><strong>{farm.area || node?.area_id || 'Área de monitoramento'}</strong><small>{node?.name ?? 'Conecte sua API'}</small></div></div><p className="nav-caption">ACOMPANHAMENTO</p><nav aria-label="Seções">{tabs.map(item => <a href={`#${item.id}`} key={item.id} aria-current={tab === item.id ? 'page' : undefined}><item.icon size={20} /><span>{item.label}</span></a>)}</nav><div className="sidebar-note"><Sprout size={22} /><strong>Do campo à informação.</strong><p>Leituras recebidas pelo notebook da equipe.</p><button onClick={share}><Copy size={16} /> Compartilhar painel</button></div><small className="sidebar-footer">API de monitoramento · v1</small></aside>
+    <div className="main-shell"><header className="topbar"><span>Monitoramento <span className="muted">/ {tabs.find(item => item.id === tab)?.label ?? 'Detalhes do ponto'}</span></span><div className="topbar-actions"><span className="live-tag"><Wifi size={15} /> API</span><PanelActions /></div></header>
       <main id="main" tabIndex={-1}>
-        <div className="page-heading"><div><p className="eyebrow">DADOS DA SUA ÁREA</p><h1>{tab === 'overview' ? 'Sua área, de perto.' : tab === 'history' ? 'Histórico de leituras.' : tab === 'alerts' ? 'Ocorrências da área.' : tab === 'device' ? 'Unidade de monitoramento.' : 'Sua lavoura e a solução.'}</h1><p>{tab === 'guide' ? 'Triagem, simulação e funcionamento em páginas próprias.' : 'Escolha o nó e o canal para acompanhar as medições recebidas.'}</p></div><button className="button secondary share-button" onClick={share}><Copy size={17} /> Copiar link</button></div>
-        {tab === 'guide' && <ProjectGuide initialColor={initialColor} />}
-        {tab !== 'guide' && <form className="connection panel" onSubmit={event => { event.preventDefault(); connect(); }}><label className="field">Endereço da API no notebook<input type="url" value={urlDraft} onChange={event => setUrlDraft(event.target.value)} placeholder="http://192.168.1.10:8000" required /></label><button className="button secondary" type="submit">Conectar</button><p className="muted">No celular, use o IP do notebook na mesma rede. A API deve permitir a origem deste painel no CORS.</p>{connectError && <p className="error" role="alert">{connectError}</p>}</form>}
-        {tab !== 'guide' && catalogLoading && <p className="notice" role="status">Carregando nós, canais e perfis…</p>}
-        {tab !== 'guide' && catalogError && <p className="error" role="alert">{catalogError} <button className="inline-link" onClick={() => setBase('')}>Editar conexão</button></p>}
-        {tab !== 'guide' && catalog && !nodes.length && <div className="empty">Nenhum nó cadastrado nesta API. Cadastre um nó e seus canais para começar.</div>}
-        {tab !== 'guide' && node && channel && <>
+        <div className="page-heading"><div><p className="eyebrow">DADOS DA SUA ÁREA</p><h1>{tab === 'overview' ? farm.area ? `Um olhar sobre ${farm.area}.` : 'Sua lavoura, de perto.' : tab === 'history' ? 'Histórico de leituras.' : tab === 'alerts' ? 'Ocorrências da área.' : tab === 'device' ? 'Unidade de monitoramento.' : 'Sua lavoura e a solução.'}</h1><p>Acompanhe as leituras, a atualização e o que merece sua atenção.</p></div><button className="button secondary share-button" onClick={share}><Copy size={17} /> Copiar link</button></div>
+        {tab === 'overview' && <FarmSummary />}
+        {!base && <div className="empty"><h2>Conecte seu monitoramento</h2><p>Configure o endereço da API para carregar as leituras da lavoura.</p><button className="button secondary" onClick={() => open('settings')}>Abrir configurações</button></div>}
+        {catalogLoading && <p className="notice" role="status">Carregando nós, canais e perfis…</p>}
+        {catalogError && <p className="error" role="alert">{catalogError} <button className="inline-link" onClick={() => setRevision(n => n + 1)}>Tentar novamente</button> <button className="inline-link" onClick={() => open('settings')}>Editar conexão</button></p>}
+        {catalog && !nodes.length && <div className="empty">Nenhum nó cadastrado nesta API. Cadastre um nó e seus canais para começar.</div>}
+        {node && channel && <>
           <section className="toolbar" aria-label="Seleção de medição"><label className="field">Área / nó<select value={node.id} onChange={event => { setNodeId(event.target.value); setChannelId(''); }}>{nodes.map(item => <option value={item.id} key={item.id}>{item.area_id} · {item.name}</option>)}</select></label><label className="field">Canal<select value={channel.channel_id} onChange={event => setChannelId(event.target.value)}>{node.channels.map(item => <option value={item.channel_id} key={item.channel_id}>{item.name}</option>)}</select></label><div className="toolbar-buttons"><button className="button secondary" onClick={() => setRevision(n => n + 1)} disabled={dataLoading}><RefreshCw size={16} /> Atualizar</button><button className="button secondary" aria-pressed={auto} onClick={() => setAuto(!auto)}>{auto ? 'Pausar' : 'Retomar'} atualização</button></div></section>
           <p className="profile-description">{profile?.description ?? 'Perfil desconhecido: interpretação indisponível.'} <span>{profile ? `${profile.label} · v${profile.version}` : `${channel.profile_id} · v${channel.profile_version}`}</span></p>
           {dataLoading && <p className="notice" role="status">Consultando leituras e ocorrências…</p>}
@@ -199,7 +187,7 @@ export function LiveApp({ onDemo }: { onDemo: () => void }) {
             {tab === 'device' && <section className="panel"><div className="panel-head"><div><h2>{node.name}</h2><p>Identificação e comunicação informadas pela API.</p></div><Cpu size={24} /></div><dl className="device-data"><div><dt>Área</dt><dd>{node.area_id}</dd></div><div><dt>Nó</dt><dd>{node.id}</dd></div><div><dt>Gateway</dt><dd>{node.gateway_id}</dd></div><div><dt>Canal / sensor</dt><dd>{channel.name} · {channel.sensor_id}</dd></div><div><dt>Sessão informada</dt><dd>{node.current_boot_id ?? 'Não informada'}</dd></div><div><dt>Contato por rádio</dt><dd>{contactLabel(node.radio_contact.status)}</dd></div><div><dt>Último contato</dt><dd>{when(node.radio_contact.observed_at)}</dd></div><div><dt>Última aquisição</dt><dd>{last ? dateLabel(last.measuredAt) : 'Sem leitura'}</dd></div><div><dt>Recebimento na API</dt><dd>{last ? dateLabel(last.receivedAt) : 'Sem leitura'}</dd></div></dl>{node.radio_contact.status !== 'fresh' && <p className="notice"><WifiOff size={18} /> O contato por rádio não está recente. Isso não determina, por si só, o estado do sensor.</p>}</section>}
           </>
         </>}
-        {tab !== 'guide' && node && !node.channels.length && <div className="empty">Este nó não possui canais cadastrados.</div>}
+        {node && !node.channels.length && <div className="empty">Este nó não possui canais cadastrados.</div>}
         <footer><span><Sprout size={16} /> tekó biotech · UERGS 2026</span><span>API: {base || 'não configurada'} · {auto ? 'consulta a cada 10 s' : 'consulta pausada'}</span></footer>
       </main></div>
     {message && <div className="toast" role="status">{message}<button aria-label="Fechar aviso" onClick={() => setMessage('')}>×</button></div>}

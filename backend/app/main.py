@@ -18,6 +18,7 @@ from .routers.readings import router as readings_router
 from .routers.devices import router as devices_router
 from .routers.gateways import router as gateways_router
 from .routers.alerts import router as alerts_router
+from .routers.simulator import router as simulator_router
 from .routers.notifications import router as notifications_router
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(gateways_router)
     app.include_router(alerts_router)
     app.include_router(notifications_router)
+    app.include_router(simulator_router)
 
     @app.get("/", tags=["Operação"], summary="Identificar a API e seus pontos de entrada")
     def index() -> dict:

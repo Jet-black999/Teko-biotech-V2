@@ -3,6 +3,7 @@ import hmac
 import json
 import secrets
 from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..database import Database
 from ..security import token_hash
@@ -38,7 +39,11 @@ def notification_text(row, alert_status, dashboard_url, now):
              f"Origem: {'simulação' if payload['source']=='simulation' else 'sensor físico'}",
              f"Ocorrência: {row['alert_id']}", 'Consulte o painel para a leitura mais recente.']
     if dashboard_url:
-        lines.append(f'Painel: {dashboard_url}')
+        url = urlsplit(dashboard_url)
+        params = dict(parse_qsl(url.query, keep_blank_values=True))
+        params.update(mode='live', node=payload['node_id'], channel=payload['channel_id'])
+        link = urlunsplit(url._replace(query=urlencode(params), fragment='alerts'))
+        lines.append(f'Painel: {link}')
     else:
         lines.append('Link do painel não configurado.')
     return '\n'.join(lines)

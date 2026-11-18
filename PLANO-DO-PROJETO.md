@@ -2,6 +2,10 @@
 
 Documento central para os três desenvolvedores do hackathon. Reúne a arquitetura acordada, divisão de responsabilidades, fluxo de trabalho, etapas de entrega e contrato proposto de integração.
 
+**Entrega de simulação integrada:** ferramenta nas configurações envia valores fictícios a um ponto exclusivo do backend. Esquema atual 5, com recibos idempotentes. O usuário confirmou os testes do frontend no celular e da integração inicial do Telegram; o ensaio real da nova ferramenta segue o [roteiro](docs/SIMULACAO-INTEGRADA.md).
+
+**Atualização de escopo:** a etapa atual concentra backend, `frontend/` oficial e bot Phytosense; firmware e análise na ESP ficam para depois. O [bot integrado](bot/README.md) já implementa consultas v1, chat autorizado, link do painel e worker da outbox. O ensaio automatizado cobre API/SQLite e transporte Telegram simulado; o recebimento real segue como aceite operacional. `web/` é referência anterior e não recebe desenvolvimento novo.
+
 O [plano do backend — Dev 1](PLANO-BACKEND.md) detalha a organização da API, banco, serviços, testes e marcos de implementação, complementando este contrato.
 
 Backend MVP (entregas 1 a 5) implementado, com banco versão 4 e 53 testes ASGI aprovados. Em 13/11/2026, o usuário confirmou a validação dos testes manuais do backend. O [roteiro de aceite](backend/ENTREGA-FINAL-BACKEND.md) permanece como referência. A organização do repositório foi realizada após esse aceite e está descrita no [mapa de pastas](docs/ORGANIZACAO-REPOSITORIO.md). O frontend já recebeu um modo API; a integração do worker do Dev 2, a validação no celular e o ensaio físico continuam pendentes. O [README do backend](backend/README.md) documenta instalação e operação.

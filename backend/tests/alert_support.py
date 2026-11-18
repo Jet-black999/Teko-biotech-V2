@@ -16,14 +16,16 @@ class AlertTestCase(ASGITestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.clock=datetime(2026,11,13,12,tzinfo=timezone.utc)
+        # Uma substituição por teste evita restauração fora de ordem quando
+        # duas requisições concorrentes usam o mesmo relógio global.
+        for target in ('app.services.alert_engine.now_utc', 'app.services.notifications.now_utc'):
+            clock_patch = patch(target, side_effect=lambda: self.clock)
+            clock_patch.start()
+            self.addCleanup(clock_patch.stop)
         self.sequence=0
         self.rule=AlertRule.model_validate_json((Path(__file__).parent.parent/'examples/alert-rule.json').read_text())
         add_rule(self.database,self.rule)
         self.bot_token=issue_bot_token(self.database)
-
-    async def request(self,*args,**kwargs):
-        with patch('app.services.alert_engine.now_utc',return_value=self.clock),patch('app.services.notifications.now_utc',return_value=self.clock):
-            return await super().request(*args,**kwargs)
 
     async def values(self,values,**changes):
         batch=copy.deepcopy(EXAMPLE);batch['readings']=[]

@@ -146,7 +146,7 @@ class IngestionTests(ASGITestCase):
         self.assertEqual(self.count(),1)
 
     async def test_profiles_health_and_unauthorized_node(self):
-        self.assertEqual((await self.request('/health',method='GET',token=False))[1],{'status':'ok','database':'ok','schema_version':4})
+        self.assertEqual((await self.request('/health',method='GET',token=False))[1],{'status':'ok','database':'ok','schema_version':5})
         response=await self.request('/api/v1/profiles',method='GET',token=False)
         self.assertEqual(response[0],200);self.assertEqual(len(response[1]['items']),4)
         with self.database.transaction() as c:
@@ -177,7 +177,7 @@ class MigrationUpgradeTests(unittest.TestCase):
                 self.assertEqual(database.initialize(),3)
                 seed_demo(database)
                 receive_heartbeat(database,'gateway-demo-01',Heartbeat.model_validate({'schema_version':1,'gateway_boot_id':'g1','gateway_boot_count':1,'sequence':10,'nodes':[{'node_id':'node-demo-01','node_boot_id':'n1','node_boot_count':1}]}))
-            self.assertEqual(database.initialize(),4)
+            self.assertEqual(database.initialize(),5)
             issue_bot_token(database)
             with database.connection(readonly=True) as c:
                 self.assertEqual(c.execute('SELECT heartbeat_sequence FROM gateways').fetchone()[0],10)
@@ -205,7 +205,7 @@ class MigrationUpgradeTests(unittest.TestCase):
                     previous_id=insert_reading(c,EXAMPLE['gateway_id'],reading,acquisition_json(reading),utc_now())
                 with database.connection(readonly=True) as c:
                     old_hash=c.execute('SELECT token_hash FROM gateways').fetchone()[0]
-            self.assertEqual(database.initialize(),4)
+            self.assertEqual(database.initialize(),5)
             self.assertEqual(ingest(database,ReadingBatch.model_validate(EXAMPLE)).results[0].status,'duplicate')
             with database.connection(readonly=True) as c:
                 self.assertEqual(c.execute('SELECT token_hash FROM gateways').fetchone()[0],old_hash)
@@ -224,8 +224,8 @@ class MigrationUpgradeTests(unittest.TestCase):
                 seed_demo(database)
                 with database.transaction() as c:
                     c.execute("UPDATE gateways SET name='Cadastro preservado' WHERE id='gateway-demo-01'")
-            self.assertEqual(database.initialize(), 4)
-            self.assertEqual(database.initialize(), 4)
+            self.assertEqual(database.initialize(), 5)
+            self.assertEqual(database.initialize(), 5)
             with database.connection(readonly=True) as c:
                 self.assertEqual(c.execute('SELECT COUNT(*) FROM channels').fetchone()[0], 8)
                 self.assertEqual(c.execute('SELECT name FROM gateways').fetchone()[0], 'Cadastro preservado')

@@ -28,7 +28,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 No notebook: http://localhost:8000, http://localhost:8000/health e http://localhost:8000/docs. No celular na mesma LAN, usar o IP do notebook em lugar de `localhost`. `0.0.0.0` é o endereço de escuta.
 
-`/health` confirma esquema **4**. O contrato de aquisição e heartbeat continua `schema_version: 1`. Migração não apaga dados; o seed é explícito e não duplica nem sobrescreve cadastros existentes. O seed comum cria 1 gateway, 2 nós, 4 perfis e 8 canais, sem regras nem medições automáticas.
+`/health` confirma esquema **5**. O contrato de aquisição e heartbeat continua `schema_version: 1`. Migração não apaga dados; o seed é explícito e não duplica nem sobrescreve cadastros existentes. O seed comum cria 1 gateway, 2 nós, 4 perfis e 8 canais, sem regras nem medições automáticas.
 
 ## Rotas públicas da demonstração na LAN
 
@@ -62,6 +62,8 @@ Todas as rotas abaixo exigem **BotServiceToken**, independente da credencial do 
 | POST | `/api/v1/internal/notifications/{id}/failed` | Registra falha e agenda retentativa. |
 
 O backend não recebe o token Telegram. O bot consulta a configuração, restringe comandos ao chat permitido, reserva, envia e confirma. Sem chat autorizado configurado, claim retorna 503 sem perder mensagens ou consumir tentativas. Falhas do bot não bloqueiam ingestão.
+
+O [bot Phytosense](../bot/README.md) implementa esse fluxo. Links de notificações abrem o frontend oficial no modo API, selecionando nó/canal e a aba de alertas. O ensaio automatizado em `tests/test_bot_integration.py` cobre abertura, consulta, entrega confirmada e recuperação com transporte Telegram simulado. O recebimento real deve ser aceito no chat configurado.
 
 ## Comandos locais
 
@@ -114,3 +116,12 @@ Foram aprovados **53 testes ASGI/SQLite** em bancos temporários. Cobrem as entr
 Roteiros anteriores: [entrega 2](TESTE-MANUAL-ENTREGA-2.md) e [entrega 3](TESTE-MANUAL-ENTREGA-3.md). Para o backend atual, use o [aceite final](ENTREGA-FINAL-BACKEND.md). O frontend e os sketches não foram conectados automaticamente nesta entrega. Organização do repositório ficará para depois desse aceite.
 
 Plano da frente: [PLANO-BACKEND.md](../PLANO-BACKEND.md). Contrato da equipe: [PLANO-DO-PROJETO.md](../PLANO-DO-PROJETO.md).
+
+## Simulação pelo frontend
+
+A [simulação integrada](../docs/SIMULACAO-INTEGRADA.md) permite inserir valores
+fictícios pela tela de configurações e acompanhar as mesmas leituras no bot.
+Prepare com `python -m app.manage prepare-simulator`, emita a credencial com
+`python -m app.manage issue-token gateway-simulator` e habilite
+`SIMULATOR_ENABLED=true` no ambiente da API. O esquema 5 acrescenta os recibos
+idempotentes dos envios, preservando as tabelas anteriores.

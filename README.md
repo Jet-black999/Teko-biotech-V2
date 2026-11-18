@@ -41,15 +41,17 @@ A configuração inicial utiliza **notebook local**, com FastAPI e SQLite. O arm
 | --- | --- |
 | Frontend integrado | Implementado em `frontend/`, com modos API e demonstração separados, triagem da lavoura, simulação e consulta a pontos; integração completa precisa de aceite no notebook. |
 | Histórico e exportação | Gráficos, tabela, períodos e CSV disponíveis na demonstração do frontend. |
-| Bot Telegram | Código inicial existente; comandos de monitoramento e integração com a API ainda precisam ser concluídos. |
+| Bot Telegram | Phytosense adaptado à API v1: consultas, chat autorizado, painel e worker da outbox. Recebimento real depende do ensaio com Telegram. |
 | Hardware | Sketches organizados em `firmware/sensor_node/` e `firmware/gateway/`; integração com o contrato e ensaio completo precisam ser validados. |
 | API e banco | Backend MVP implementado: ingestão, catálogo, histórico, sessões, alertas numéricos e outbox do bot. 53 testes ASGI aprovados e testes manuais validados pelo usuário; integração física e envio real pelo bot pendentes. |
 | Fila persistente, sincronização e alertas | Especificados no plano; validação integrada pendente. |
 | Sensores e critérios de análise | Em definição. |
 
+O foco atual é finalizar backend, frontend e Telegram com dados demonstrativos. Firmware, aquisição ESP e análise física serão desenvolvidos posteriormente. `frontend/` é a interface oficial; `web/` e `legacy/` são referências anteriores.
+
 O frontend ainda não está conectado a medições físicas. Os exemplos apresentados são simulações, sem comprovação de concentração, contaminação ou classificação agronômica. Critérios reais dependem da escolha dos sensores, calibração e validação do método.
 
-Os protótipos anteriores estão preservados em [legacy/](legacy/README.md). `legacy/web/` e o bot atual ainda contêm a proposta antiga com saco de gel. O fluxo atual do produto está em `frontend/`. O bot ainda precisa ser adaptado antes de ser oferecido como Tekó.
+Os protótipos anteriores estão preservados em [legacy/](legacy/README.md). O fluxo atual do produto está em `frontend/`. O processo oficial do bot é `bot/phytosense_bot.py`; os módulos antigos não participam desse atendimento.
 
 ## Organização do repositório
 
@@ -103,13 +105,13 @@ O build gera `frontend/dist/`. O roteiro de validação está no [README do fron
 
 ## Backend MVP
 
-A implementação está em **[backend/](backend/README.md)**. O banco passa para esquema **4**, preservando catálogo, tokens, leituras e sessões. O [aceite final do backend](backend/ENTREGA-FINAL-BACKEND.md) documenta alertas, reserva de notificações, retentativas e integração do Dev 2. O backend prepara e registra as mensagens; o bot realiza o envio real ao Telegram.
+A implementação está em **[backend/](backend/README.md)**. O banco passa para esquema **5**, preservando catálogo, tokens, leituras e sessões. O [aceite final do backend](backend/ENTREGA-FINAL-BACKEND.md) documenta alertas, reserva de notificações, retentativas e integração do Dev 2. O backend prepara e registra as mensagens; o bot realiza o envio real ao Telegram.
 
 Os alertas automáticos desta versão são numéricos e exigem horário de aquisição confiável e recente. Leituras sem horário continuam armazenadas, mas não abrem ou recuperam ocorrências. Isso precisa ser considerado na integração do firmware. Regras de exemplo são experimentais e voltadas à simulação.
 
 ## Bot Telegram
 
-O código inicial e seus requisitos estão em [bot/](bot/). Para preparar o ambiente em Linux/macOS:
+O [guia do bot Phytosense](bot/README.md) documenta configuração e ensaio completo. Para preparar o ambiente em Linux/macOS:
 
 ```bash
 cd bot
@@ -119,9 +121,9 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Preencha o token e a URL apropriada em `.env`, sem versionar credenciais. O [guia existente](docs/CONFIGURACAO-TELEGRAM.md) documenta a configuração inicial; textos, comandos e identidade ainda precisam ser adaptados à plataforma atual.
+Preencha `TELEGRAM_TOKEN`, `BACKEND_API_URL` e `BOT_SERVICE_TOKEN` no `.env` do bot, sem versionar credenciais. Chat autorizado e endereço do frontend são configurados no backend. Inicie com `python phytosense_bot.py`; consulte o [guia de configuração](docs/CONFIGURACAO-TELEGRAM.md).
 
-O MVP prevê `/start`, `/status`, `/sensores`, `/alertas`, `/painel` e `/ajuda`, além de envio de alertas com link do dashboard. O estado da ocorrência e as retentativas de notificação deverão ser persistidos pela API.
+O bot atende `/start`, `/status` (também `/planta`), `/sensores`, `/alertas`, `/painel` e `/ajuda`. O worker reserva notificações na API e confirma o envio ou informa falha; estado e retentativas permanecem no backend. Uma falha da API informa indisponibilidade, sem substituir os dados por simulação.
 
 No ensaio local, `/painel` deve enviar um link comum com o IP do notebook. O botão Mini App da implementação anterior exige HTTPS e precisa de tratamento diferente para um endereço HTTP local. Esse link local não é acessível fora da rede do notebook.
 
@@ -142,3 +144,10 @@ No ensaio local, `/painel` deve enviar um link comum com o IP do notebook. O bot
 5. Validar o fluxo completo no celular e PC, incluindo interrupção e recuperação de conexão.
 
 Cada desenvolvedor trabalha em branch própria, com entregas pequenas e revisão por outro membro. Alterações no contrato devem acompanhar a documentação e ser combinadas com a equipe.
+
+## Demonstração integrada pelo painel
+
+O usuário confirmou o teste do frontend no celular e da integração inicial do
+Telegram. A próxima ferramenta está em **Configurações → Abrir simulação
+integrada**: salva valores fictícios em um ponto exclusivo no backend e usa
+o motor e a fila existentes. Consulte o [roteiro de preparação e teste](docs/SIMULACAO-INTEGRADA.md).
